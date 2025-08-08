@@ -10,7 +10,8 @@ class MessageType(Enum):
     ACCEPTED = 6
     REJECTED = 7
     REGISTERED = 8
-    ASSOCIATE_REQUEST = 0
+    ASSOC_REQUEST = 9
+    TOKEN_ASSOC = 10
     # More...
 
 

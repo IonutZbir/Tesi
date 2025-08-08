@@ -26,3 +26,6 @@ Il client genera una sola volta la chiave privata $x$, per poi andarla a memoriz
 
 Entro 11: Applicazione mobile
 Entro 18: Server funzionante che permetta l autenticazione con il sistema (1) + associazione dispositivi
+
+
+piu client sullo stesso dispositivo, cambiare modalità di nomenclatura dei file
