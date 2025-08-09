@@ -257,13 +257,13 @@ def main():
                     "\n[CLIENT] Seleziona un'opzione:\n"
                     "  [R] Registrati\n"
                     "  [A] Accedi\n"
+                    "  [D] Richiedi abbinamento dispositivo\n"
                     "  [Q] Esci\n"
                 )
             else:
                 menu_message = (
                     "\n[CLIENT] Seleziona un'opzione:\n"
                     "  [L] Log out\n"
-                    "  [D] Richiedi abbinamento dispositivo\n"
                     "  [C] Conferma abbinamento dispositivo\n"
                     "  [Q] Esci\n"
                 )
@@ -278,6 +278,8 @@ def main():
                     success = authentication(sock, p, g, q)
                     if success:
                         logged_in = True
+                elif ans == "D":
+                    association(sock, p, g, q)
                 elif ans == "Q":
                     print("[CLIENT] Uscita dal client.")
                     break
@@ -285,8 +287,6 @@ def main():
                 if ans == "L":
                     log_out(sock, p, g, q)
                     logged_in = False
-                elif ans == "D":
-                    association(sock, p, g, q)
                 elif ans == "C":
                     confirm_association(sock, p, g, q)
                 elif ans == "Q":
