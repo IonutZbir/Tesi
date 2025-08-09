@@ -1,61 +1,56 @@
 import 'dart:convert';
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'dart:io';
 import '../models/messages.dart';
 
 class SocketService {
-  late final WebSocketChannel _channel;
+  Socket? _socket;
+  final String host;
+  final int port;
   final void Function(String message)? onMessage;
 
-  SocketService({required String url, this.onMessage}) {
-    _channel = WebSocketChannel.connect(Uri.parse(url));
+  SocketService({required this.host, required this.port, this.onMessage});
 
-    _channel.stream.listen(
-      _handleMessage,
-      onError: _handleError,
-      onDone: _handleDone,
-      cancelOnError: true,
-    );
-  }
-
-  void _handleMessage(dynamic message) {
+  Future<void> connectAndSendToken(String token) async {
     try {
-      print('[SOCKET]: Messaggio ricevuto -> $message');
+      _socket = await Socket.connect(host, port);
+      print('[SOCKET]: Connessione aperta verso $host:$port');
 
-      // Qui puoi già fare il decode se vuoi lavorare direttamente con JSON
-      if (onMessage != null) {
-        onMessage!(message.toString());
-      }
+      // Ascolta i messaggi in arrivo dal server
+      _socket!.listen(
+        (data) {
+          final message = utf8.decode(data);
+          print('[SOCKET]: Messaggio ricevuto -> $message');
+          if (onMessage != null) {
+            onMessage!(message);
+          }
+        },
+        onError: (error) {
+          print('[SOCKET ERROR]: Errore nella connessione: $error');
+        },
+        onDone: () {
+          print('[SOCKET]: Connessione chiusa dal server.');
+          dispose();
+        },
+      );
+
+      final message = jsonEncode({
+        'type': MessageType.tokenAssoc.index,
+        'token': token,
+      });
+
+      print('[SOCKET]: Invio token -> $message');
+
+      // Invia il messaggio al server (aggiungi newline se il server lo richiede)
+      _socket!.write(message);
+      // Se necessario, puoi inviare un delimitatore come newline: _socket!.write("$message\n");
+
     } catch (e) {
-      print('[SOCKET ERROR]: Errore nella gestione del messaggio: $e');
+      print('[SOCKET ERROR]: Errore durante la connessione -> $e');
     }
   }
 
-  void _handleError(error) {
-    print('[SOCKET ERROR]: Connessione fallita o interrotta: $error');
-    // Potresti voler invocare una callback, o mostrare un messaggio all’utente
-  }
-
-  void _handleDone() {
-    print('[SOCKET]: Connessione chiusa dal server.');
-  }
-
-  void sendToken(String token) {
-    final message = jsonEncode({
-      'type': MessageType.associateRequest.index,
-      'token': token,
-    });
-
-    print('[SOCKET]: Invio token -> $message');
-    _channel.sink.add(message);
-  }
-
-  void sendMessage(Map<String, dynamic> data) {
-    final message = jsonEncode(data);
-    print('[SOCKET]: Invio messaggio generico -> $message');
-    _channel.sink.add(message);
-  }
-
   void dispose() {
-    _channel.sink.close();
+    _socket?.destroy();
+    _socket = null;
   }
 }

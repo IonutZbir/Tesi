@@ -1,21 +1,25 @@
-import 'package:english_words/english_words.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 class MyAppState extends ChangeNotifier {
-  var current = WordPair.random();
-  var favorites = <WordPair>[];
+  String? _username;
+  bool _isLoggedIn = false;
 
-  void getNext() {
-    current = WordPair.random();
+  String? get username => _username;
+  bool get isLoggedIn => _isLoggedIn;
+
+  // Metodo per fare il login
+  void login(String username) {
+    _username = username;
+    _isLoggedIn = true;
     notifyListeners();
   }
 
-  void toggleFavorite() {
-    if (favorites.contains(current)) {
-      favorites.remove(current);
-    } else {
-      favorites.add(current);
-    }
+  // Metodo per fare logout
+  void logout() {
+    _username = null;
+    _isLoggedIn = false;
     notifyListeners();
   }
+
+  // Puoi aggiungere altri metodi e proprietà per gestire lo stato globale
 }

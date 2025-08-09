@@ -14,35 +14,45 @@ class _QrCodeScannerPageState extends State<QrCodeScannerPage> {
   bool _isProcessing = false;
 
   late SocketService _socket;
+  final String host = '192.168.1.168';
+  final int port = 65432;
 
   @override
   void initState() {
     super.initState();
-
-    var url = 'ws://192.168.1.168:65432';
-
-    _socket = SocketService(
-      url: url,
-      onMessage: _handleServerMessage,
-    );
-    print("[CLIENT]: Mi sto collegando a: $url");
+    _socket = SocketService(host: host, port: port);
+    print("[CLIENT]: Scanner pronto, in attesa di QR...");
   }
 
-  void _handleServerMessage(String message) {
-    print('[CLIENT]: Ricevuto dal server -> $message');
+  void _onDetect(BarcodeCapture capture) {
+    if (_isProcessing || capture.barcodes.isEmpty) return;
 
-    // Mostra un dialog con la risposta del server
+    final barcode = capture.barcodes.first;
+    final String? token = barcode.rawValue;
+
+    if (token == null || token.isEmpty) return;
+
+    setState(() => _isProcessing = true);
+    _controller.stop();
+
+    print('[CLIENT]: Token letto: $token');
+    print('[CLIENT]: Mi sto collegando a: $host:$port');
+
+    _socket.connectAndSendToken(token);
+
+    // Mostra subito il dialog con il token letto
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Risposta del server'),
-        content: Text(message),
+        backgroundColor: Colors.white,
+        title: const Text('Token letto'),
+        content: Text(token),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
               _controller.start();
-              _isProcessing = false;
+              setState(() => _isProcessing = false);
             },
             child: const Text('OK'),
           ),
@@ -51,36 +61,10 @@ class _QrCodeScannerPageState extends State<QrCodeScannerPage> {
     );
   }
 
-  void _onDetect(BarcodeCapture capture) {
-  if (_isProcessing) return;
-
-  if (capture.barcodes.isEmpty) return;
-
-  final barcode = capture.barcodes.first;
-  final String? token = barcode.rawValue;
-
-  if (token == null || token.isEmpty) return;
-
-  try {
-    _isProcessing = true;
-    _controller.stop();
-
-    print('[CLIENT]: Token letto: $token');
-    _socket.sendToken(token);
-  } catch (e, stacktrace) {
-    print('[ERROR] Errore in _onDetect: $e');
-    print(stacktrace);
-
-    // In caso di errore, riabilita la scansione
-    _isProcessing = false;
-    _controller.start();
-  }
-}
-
-
   @override
   void dispose() {
     _controller.dispose();
+    _socket.dispose();
     super.dispose();
   }
 

@@ -2,29 +2,27 @@ import socket
 import json
 import random
 import sys
+import qrcode
+import platform
+from pathlib import Path
 from utils.message import MessageType, ErrorType
 from utils.groups import GROUPS
-from pathlib import Path
 from utils.utils import get_linux_device_model
 
-import platform
+# --- COSTANTI ---
 
-project_root = Path(__file__).resolve().parent.parent
-sys.path.append(str(project_root))
-
-HOST = '127.0.0.1'
+HOST = "192.168.1.168"
 PORT = 65432
-
 CONFIG_PATH = Path.home() / ".config"
+SCHNORR_DIR = CONFIG_PATH / "schnorr"
 
-def load_private_key(username):
-    schnorr_dir = CONFIG_PATH / "schnorr"
-    schnorr_dir.mkdir(parents=True, exist_ok=True)
-    
-    privkey_path = schnorr_dir / f"{username}_privkey.txt"
-    
-    # if privkey_path.exists():
-        
+
+# --- FUNZIONI UTILI ---
+
+
+def load_private_key(username: str) -> int:
+    """Carica la chiave privata dal file, esce se non trovata."""
+    privkey_path = SCHNORR_DIR / f"{username}_privkey.txt"
     try:
         with open(privkey_path, "r") as f:
             print(f"[CLIENT] INFO: lettura chiave privata da {privkey_path}.")
@@ -33,170 +31,270 @@ def load_private_key(username):
         print("[CLIENT] Errore: chiave privata non trovata. Registrati prima di autenticarti.")
         sys.exit(1)
 
-def save_private_key(username, alpha):
-    schnorr_dir = CONFIG_PATH / "schnorr"
-    schnorr_dir.mkdir(parents=True, exist_ok=True)
-    privkey_path = schnorr_dir / f"{username}_privkey.txt"
+
+def save_private_key(username: str, alpha: int) -> None:
+    """Salva la chiave privata su file."""
+    SCHNORR_DIR.mkdir(parents=True, exist_ok=True)
+    privkey_path = SCHNORR_DIR / f"{username}_privkey.txt"
     with open(privkey_path, "w") as f:
         f.write(str(alpha))
-        print(f"[CLIENT] INFO: chiave privata memorizzata in {privkey_path}.")
+    print(f"[CLIENT] INFO: chiave privata memorizzata in {privkey_path}.")
 
-def receive_json(sock):
+
+def receive_json(sock: socket.socket) -> dict:
+    """Riceve dati JSON dal socket e li decodifica."""
     data = sock.recv(4096)
     if not data:
         print("[CLIENT] Connessione chiusa dal server")
         sys.exit(1)
     return json.loads(data.decode())
 
-def send_json(sock, message):
+
+def send_json(sock: socket.socket, message: dict) -> None:
+    """Invia dati JSON serializzati sul socket."""
     sock.sendall(json.dumps(message).encode())
 
-def registration(sock, p, g, q):
+
+def send_message(sock: socket.socket, msg_type: MessageType, extra_data=None) -> None:
+    payload = {
+        "type_code": msg_type.code,
+        "type": msg_type.label,
+    }
+    if extra_data:
+        payload.update(extra_data)
+    send_json(sock, payload)
+
+
+def send_error(sock: socket.socket, error_type: ErrorType, details=None) -> None:
+    payload = {
+        "type_code": MessageType.ERROR.code,
+        "type": MessageType.ERROR.label,
+        "error_code": error_type.code,
+        "error": error_type.label,
+        "message": error_type.message(),
+    }
+    if details:
+        payload["details"] = details
+    send_json(sock, payload)
+
+
+def create_qr_code(token: str) -> None:
+    """Crea e mostra un QR code dal token dato."""
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(token)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    img.show()
+
+
+# --- LOGICA CLIENT ---
+
+
+def get_device_name() -> str:
+    manuf, _ = get_linux_device_model()
+    return f"{manuf} {platform.system()} {platform.machine()}"
+
+
+def registration(sock: socket.socket, p: int, g: int, q: int) -> None:
     username = input("Inserisci uno username per la registrazione: ").strip()
     alpha = random.randint(1, q - 1)
-
-    manuf, _ = get_linux_device_model()
-
-    device_name =  manuf + " " + platform.system() + " " + platform.machine()
-
+    device_name = get_device_name()
     public_key = hex(pow(g, alpha, p))
-    msg = {"type": MessageType.REGISTER.value, "username": username, "public_key": public_key, "device": device_name}
-    send_json(sock, msg)
+
+    send_message(
+        sock,
+        MessageType.REGISTER,
+        {
+            "username": username,
+            "public_key": public_key,
+            "device": device_name,
+        },
+    )
 
     response = receive_json(sock)
-    if response.get("type") == MessageType.ERROR.value:
-        val = response.get('error')
-        print(f"[CLIENT] Errore dal server: {ErrorType.message(val)}")
-    elif response.get("type") == MessageType.REGISTERED.value:
-        print(f"[CLIENT] INFO: Registrazione dal dispositivo: {device_name}")
-        print("[CLIENT] Registrazione completata con successo.")
-        print(f"[CLIENT] Chiave segreta generata e salvata localmente.")
+    if response.get("type_code") == MessageType.ERROR.code:
+        err = ErrorType.from_code(response.get("error_code"))
+        print(f"[CLIENT] Errore dal server: {err.message()}")
+        return False
+    elif response.get("type_code") == MessageType.REGISTERED.code:
+        print(f"[CLIENT] {MessageType.REGISTERED.message()}")
         save_private_key(username, alpha)
+        return True
     else:
         print("[CLIENT] Risposta inattesa dal server:", response)
+        return False
 
-def authentication(sock, p, g, q):
+
+def authentication(sock: socket.socket, p: int, g: int, q: int) -> None:
     username = input("Inserisci uno username per l'autenticazione: ").strip()
     alpha = load_private_key(username)
 
     alpha_t = random.randint(1, q - 1)
     u_t = hex(pow(g, alpha_t, p))
-    auth_request = {"type": MessageType.AUTH_REQUEST.value, "temp": u_t, "username": username}
-    send_json(sock, auth_request)
+    send_message(sock, MessageType.AUTH_REQUEST, {"temp": u_t, "username": username})
 
     response = receive_json(sock)
-    if response.get("type") == MessageType.ERROR.value:
-        val = response.get('error')
-        print(f"[CLIENT] Errore dal server: {ErrorType.message(val)}")
+    if response.get("type_code") == MessageType.ERROR.code:
+        err = ErrorType.from_code(response.get("error_code"))
+        print(f"[CLIENT] Errore dal server: {err.message()}")
         return
 
-    if response.get("type") != MessageType.CHALLENGE.value:
+    if response.get("type_code") != MessageType.CHALLENGE.code:
         print("[CLIENT] Risposta inattesa dal server durante autenticazione.")
         return
 
-    c = response["challenge"]
-    print(f"[CLIENT] Ricevuto challenge: {c[:20]}")
-
-    c = int(c, 16)
+    c = int(response["challenge"], 16)
+    print(f"[CLIENT] Ricevuto challenge: {response['challenge'][:20]}...")
 
     alpha_z = (alpha_t + alpha * c) % q
-    auth_response = {"type": MessageType.AUTH_RESPONSE.value, "response": hex(alpha_z)}
-    send_json(sock, auth_response)
+    send_message(sock, MessageType.AUTH_RESPONSE, {"response": hex(alpha_z)})
 
     final_response = receive_json(sock)
-    if final_response.get("type") == MessageType.ACCEPTED.value:
+    if final_response.get("type_code") == MessageType.ACCEPTED.code:
         print("[CLIENT] Autenticazione riuscita!")
-    elif final_response.get("type") == MessageType.REJECTED.value:
+        return True
+    elif final_response.get("type_code") == MessageType.REJECTED.code:
         print("[CLIENT] Autenticazione fallita.")
+        return False
     else:
         print("[CLIENT] Risposta inattesa dal server dopo autenticazione.")
-
-def association(sock, p, g, q):
-    manuf, _ = get_linux_device_model()
-
-    device_name =  manuf + " " + platform.system() + " " + platform.machine() # + random.randint(0, 10000)
-    
-    alpha = random.randint(1, q - 1)
-
-    public_key = hex(pow(g, alpha, p))
-    
-    assoc_req = {"type": MessageType.ASSOC_REQUEST.value, "device": device_name, "pk": public_key}
-    send_json(sock, assoc_req)
-    
-    print("[CLIENT] Inviata richiesta di associazione del dispositivo")
-    
-    res = receive_json(sock) # il server invia al client un token temporaneo, usato dal client principale per associare il nuovo dispositivo
-    
-    if res.get("type") == MessageType.TOKEN_ASSOC.value:
-        token = res.get("token") # TODO: il token verrà cifrato con SHA256 e poi inviato
-        print(f"[CLIENT] Token ricevuto dal server: {token}")
-    elif res.get("type") == MessageType.ERROR.value:
-        val = res.get('error')
-        print(f"[CLIENT] Errore dal server {ErrorType.message(val)}")
         return
-    
-    # save_private_key(username, alpha)
 
-def confirm_association(sock, p, g, q):
-    ans = input("[CLIENT] Inserisci codice di abbinamento\n")
-    
+
+def association(sock: socket.socket, p: int, g: int, q: int) -> None:
+    device_name = get_device_name()
+    alpha = random.randint(1, q - 1)
+    public_key = hex(pow(g, alpha, p))
+
+    send_message(sock, MessageType.ASSOC_REQUEST, {"device": device_name, "pk": public_key})
+
+    print("[CLIENT] Inviata richiesta di associazione del dispositivo")
+
+    res = receive_json(sock)
+    if res.get("type_code") == MessageType.TOKEN_ASSOC.code:
+        token = res.get("token")
+        print(f"[CLIENT] Token ricevuto dal server: {token}")
+        create_qr_code(token)
+    elif res.get("type_code") == MessageType.ERROR.code:
+        err = ErrorType.from_code(res.get("error_code"))
+        print(f"[CLIENT] Errore dal server: {err.message()}")
+    else:
+        print("[CLIENT] Risposta inattesa dal server:", res)
+
+
+def log_out(sock: socket.socket, p: int, g: int, q: int) -> None:
+    send_message(sock, MessageType.LOGOUT)
+    response = receive_json(sock)
+    if response.get("type_code") == MessageType.LOGGED_OUT.code:
+        print("[CLIENT] Logout effettuato con successo.")
+    elif response.get("type_code") == MessageType.ERROR.code:
+        err = ErrorType.from_code(response.get("error_code"))
+        print(f"[CLIENT] Errore dal server: {err.message()}")
+    else:
+        print("[CLIENT] Risposta inattesa dal server:", response)
+
+
+def confirm_association(sock: socket.socket, p: int, g: int, q: int) -> None:
+    ans = input("[CLIENT] Inserisci codice di abbinamento: ").strip()
+    # Supponiamo il messaggio da inviare sia tipo ASSOC_CONFIRM, definisci se serve e invia
+    send_message(sock, MessageType.TOKEN_ASSOC, {"token": ans})
+
+    response = receive_json(sock)
+    if response.get("type_code") == MessageType.ACCEPTED.code:
+        print("[CLIENT] Abbinamento confermato con successo.")
+    elif response.get("type_code") == MessageType.ERROR.code:
+        err = ErrorType.from_code(response.get("error_code"))
+        print(f"[CLIENT] Errore dal server: {err.message()}")
+    else:
+        print("[CLIENT] Risposta inattesa dal server:", response)
+
+def handshake(sock: socket.socket):
+    send_message(sock, MessageType.HANDSHAKE_REQ)
+    print("[CLIENT] Richiesta di handshake inviata al server...")
+
+    handshake_msg = receive_json(sock)
+    print("[CLIENT] Fase di handshake...")
+
+    send_json(sock, {"status": "received"})
+
+    group = handshake_msg.get("group_id")
+    print(f"[CLIENT] {group}")
+    if group not in GROUPS:
+        print("[CLIENT] Gruppo crittografico non supportato dal client.")
+        return False
+    return group
+
+# --- MAIN ---
+
 
 def main():
+    logged_in = False
+    current_user = False
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((HOST, PORT))
+        print(f"[CLIENT] Connesso a {HOST}:{PORT}")
 
-        # Fase handshake
-        handshake_msg = receive_json(sock)
-        print(f"[CLIENT] Fase di handshake...")
-
-        # Rispondiamo al server per confermare ricezione
-        send_json(sock, {"status": "received"})
-
-        group = handshake_msg.get("group_id")
-        if group not in GROUPS:
-            print("[CLIENT] Gruppo crittografico non supportato dal client.")
+        # Handshake
+        group = handshake(sock)
+        if not group:
             sys.exit(1)
 
-        print(f"[CLIENT] Handshake andato a buon fine...")
+        print("[CLIENT] Handshake andato a buon fine...")
 
         p = GROUPS[group]["p"]
         g = GROUPS[group]["g"]
         q = (p - 1) // 2
 
-        # print(f"[CLIENT] Parametri gruppo:\n p = {hex(p)[:20]}... (troncato)\n g = {g}\n q = {hex(q)[:20]}... (troncato)")
-        # print(f"[CLIENT] Parametri gruppo:\n p = {p}\n g = {g}\n q = {q}")
-
-        # Scelta dell'azione da parte dell'utente
         while True:
-            menu_message = (
-                "\n[CLIENT] Seleziona un'opzione:\n"
-                "  [R] Registrati\n"
-                "  [A] Autenticati\n"
-                "  [B] Richiedi abbinamento dispositivo\n"
-                "  [C] Conferma abbinamento dispositivo\n"
-                "  [Q] Esci\n"
-            )
+            if not logged_in:
+                menu_message = (
+                    "\n[CLIENT] Seleziona un'opzione:\n"
+                    "  [R] Registrati\n"
+                    "  [A] Accedi\n"
+                    "  [Q] Esci\n"
+                )
+            else:
+                menu_message = (
+                    "\n[CLIENT] Seleziona un'opzione:\n"
+                    "  [L] Log out\n"
+                    "  [D] Richiedi abbinamento dispositivo\n"
+                    "  [C] Conferma abbinamento dispositivo\n"
+                    "  [Q] Esci\n"
+                )
             print(menu_message)
             ans = input("[CLIENT] Inserisci la tua scelta: ").strip().upper()
-            if ans == "R":
-                registration(sock, p, g, q)
-            elif ans == "A":
-                authentication(sock, p, g, q)
-                
-                # ans = input("Vuoi scegliere il nome utente? Ricorda che sarà visibile pubblicamente: S/N\n")
-                # if ans == "S":
-                #     pass
-                # elif ans == "N":
-                #     pass
-            elif ans == "B":
-                association(sock, p, g, q)
-            elif ans == "B":
-                confirm_association(sock, p, g, q)
-            elif ans == "Q":
-                print("[CLIENT] Uscita dal client.")
-                break
+            if not logged_in:
+                if ans == "R":
+                    success = registration(sock, p, g, q)
+                    if success:
+                        logged_in = True
+                elif ans == "A":
+                    success = authentication(sock, p, g, q)
+                    if success:
+                        logged_in = True
+                elif ans == "Q":
+                    print("[CLIENT] Uscita dal client.")
+                    break
             else:
-                print("[CLIENT] Input non valido, riprova.")
+                if ans == "L":
+                    log_out(sock, p, g, q)
+                    logged_in = False
+                elif ans == "D":
+                    association(sock, p, g, q)
+                elif ans == "C":
+                    confirm_association(sock, p, g, q)
+                elif ans == "Q":
+                    print("[CLIENT] Uscita dal client.")
+                    break
+                else:
+                    print("[CLIENT] Input non valido, riprova.")
+
 
 if __name__ == "__main__":
     main()

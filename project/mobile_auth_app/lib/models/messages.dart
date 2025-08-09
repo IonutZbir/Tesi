@@ -10,6 +10,7 @@ enum MessageType {
   rejected,
   registered,
   associateRequest,
+  tokenAssoc,
   // More...
 }
 
