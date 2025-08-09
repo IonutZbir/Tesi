@@ -4,6 +4,17 @@ Ci sono però alcune cose che migliorerei, sia per chiarezza che per sicurezza:
 
 ---
 
+3. Sicurezza token di associazione
+L’approccio di usare pk + device_name + nonce e poi SHA-256 è buono per un prototipo.
+In un sistema reale, però, il token dovrebbe:
+
+    avere scadenza temporale
+
+    essere legato ad una sessione autenticata (quindi non generabile da un client non loggato)
+
+    essere monouso
+
+
 **1. Costruzione del token**
 L’idea di concatenare pezzi di `pk` (chiave pubblica del dispositivo) con il `device_name` è creativa, ma non necessariamente garantisce un’adeguata resistenza a collisioni o attacchi a forza bruta.
 
