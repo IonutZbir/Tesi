@@ -31,7 +31,7 @@ class TempToken:
 
 
     @staticmethod
-    def find_pk_by_id(self, token: str) -> dict | None:
+    def find_pk_by_id(token: str) -> dict | None:
         """
         Trova la coppia token - pk dato il token MongoDB per l'id.
 

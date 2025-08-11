@@ -173,7 +173,9 @@ def handle_assoc_confirm(ctx: ConnContext, msg: dict):
 
     pk, device_name = temp_token["pk"], temp_token["device_name"]
     
-    for device in ctx.session.user.devices: 
+    devices = ctx.session.user.devices
+    
+    for device in devices: 
         if device["device_name"] == device_name and not device_name["main_device"]: 
             ctx.send_error(ErrorType.NO_MAIN_DEVICE)
             return
@@ -187,7 +189,7 @@ def handle_assoc_confirm(ctx: ConnContext, msg: dict):
         ctx.send_error(ErrorType.TOKEN_INVALID_OR_EXPIRED)
         return
 
-    if "user" not in ctx.session:
+    if not ctx.session.is_authenticated():
         ctx.send_error(ErrorType.SESSION_NOT_FOUND)
         return
 
