@@ -3,10 +3,8 @@ import threading
 import random
 import hashlib
 import os
-import json
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
 
 # Assicurati che il project_root sia nel path prima di importare i moduli interni
 project_root = Path(__file__).resolve().parent.parent
@@ -14,70 +12,11 @@ sys.path.append(str(project_root))
 
 from utils.message import MessageType, ErrorType
 from utils.groups import GROUPS
-from utils.db import db
+from utils.context import ConnContext
 
-class ConnContext:
-    MESSAGE_LENGTH = 4096
+from models.user import *
+from models.temp_token import *
 
-    def __init__(self, conn: socket.socket, addr: str):
-        self.conn = conn
-        self.addr = addr
-        self.session = {}  # dati temporanei (user, challenge, u_t, ...)
-        self._closed = False
-
-    def close(self):
-        try:
-            if not self._closed:
-                self.conn.close()
-                self._closed = True
-        except Exception as e:
-            print(f"[SERVER] Errore durante la chiusura della connessione {self.addr}: {e}")
-        finally:
-            self.session.clear()
-            print(f"[SERVER] Connessione con {self.addr} chiusa.")
-
-    def update_session(self, data: dict):
-        self.session.update(data)
-
-    @property
-    def is_session_empty(self):
-        return not self.session
-
-    def _send_json(self, message: dict):
-        try:
-            self.conn.sendall(json.dumps(message).encode())
-        except BrokenPipeError:
-            print(f"[SERVER] Errore: connessione chiusa dal client {self.addr} durante l'invio")
-
-    def receive_json(self):
-        try:
-            data = self.conn.recv(self.MESSAGE_LENGTH)
-            if not data:
-                return None
-            return json.loads(data.decode())
-        except (ConnectionResetError, json.JSONDecodeError):
-            return None
-
-    def send_message(self, msg_type: MessageType, extra_data=None):
-        payload = {
-            "type_code": msg_type.code,
-            "type": msg_type.label,
-        }
-        if extra_data:
-            payload.update(extra_data)
-        self._send_json(payload)
-
-    def send_error(self, error_type: ErrorType, details=None):
-        payload = {
-            "type_code": MessageType.ERROR.code,
-            "type": MessageType.ERROR.label,
-            "error_code": error_type.code,
-            "error": error_type.label,
-            "message": error_type.message(),
-        }
-        if details:
-            payload["details"] = details
-        self._send_json(payload)
 
 # --- Struttura globale per le connessioni attive ---
 active_connections = {}
@@ -87,7 +26,7 @@ def register_connection(identifier: str, ctx: ConnContext):
     with connections_lock:
         active_connections[identifier] = ctx
 
-def get_connection(identifier):
+def get_connection(identifier) -> ConnContext:
     with connections_lock:
         return active_connections.get(identifier)
 
@@ -98,6 +37,7 @@ def remove_connection(identifier):
 # ---------- handlers ----------
 
 def handle_registration(ctx: ConnContext, msg: dict):
+    # TODO: input validation
     username = msg.get("username")
     device_name = msg.get("device")
     pk = msg.get("public_key")
@@ -106,56 +46,54 @@ def handle_registration(ctx: ConnContext, msg: dict):
         ctx.send_error(ErrorType.MALFORMED_MESSAGE)
         return
 
-    users_collection = db["users"]
-
-    if users_collection.find_one({"_id": username}):
+    if User.find_user_by_id(username):
         ctx.send_error(ErrorType.USERNAME_ALREADY_EXISTS)
         print(f"[SERVER] Registrazione fallita: username '{username}' già esistente")
         return
 
-    user = {
-        "_id": username,
-        "devices": [{"pk": pk, "device_name": device_name, "main_device": True, "logged": True}],
-        "created_at": datetime.now().isoformat(),
-    }
+    user = User(username)
+    user.add_device(Device(pk, device_name))
 
-    users_collection.insert_one(user)
-    ctx.update_session({"user": user})
+    user.insert_user()
+    
+    ctx.update_session(user=user, logged_device=device_name, login_time=datetime.now())
+    
     ctx.send_message(MessageType.REGISTERED)
     print(f"[SERVER] Utente registrato: {username}")
 
 
 def handle_auth_request(ctx: ConnContext, msg: dict, q: int):
+    # TODO: input validation
     username = msg.get("username")
-    temp_hex = msg.get("temp")
-    if not username or not temp_hex:
+    temp_pk_hex = msg.get("temp")
+    if not username or not temp_pk_hex:
         ctx.send_error(ErrorType.MALFORMED_MESSAGE)
         return
 
-    users_collection = db["users"]
-    user_doc = users_collection.find_one({"_id": username})
+    user = User.find_user_by_id(username)
 
-    if not user_doc or not user_doc.get("devices"):
+    if not user:
         ctx.send_error(ErrorType.USERNAME_NOT_FOUND)
         print(f"[SERVER] Autenticazione fallita: username '{username}' non trovato")
         return
 
     # validate and parse temp (hex)
     try:
-        u_t = int(temp_hex, 16)
+        temp_pk = int(temp_pk_hex, 16)
     except (ValueError, TypeError):
         ctx.send_error(ErrorType.MALFORMED_MESSAGE)
         return
 
     challenge = random.randint(0, q - 1)
-
-    ctx.update_session({"u_t": u_t, "user": user_doc, "challenge": challenge})
+    
+    ctx.update_session(temp_pk=temp_pk, user=user, challenge=challenge)
+    
     ctx.send_message(MessageType.CHALLENGE, {"challenge": hex(challenge)})
     print(f"[SERVER] Sfida inviata a {username}: {hex(challenge)[:20]}...")
 
 
 def handle_auth_response(ctx: ConnContext, msg: dict, p: int, g: int):
-    if ctx.is_session_empty or "user" not in ctx.session:
+    if ctx.is_session_empty:
         print("[SERVER] Risposta di autenticazione senza sessione attiva")
         ctx.send_error(ErrorType.SESSION_NOT_FOUND)
         return
@@ -171,9 +109,9 @@ def handle_auth_response(ctx: ConnContext, msg: dict, p: int, g: int):
         ctx.send_error(ErrorType.MALFORMED_MESSAGE)
         return
 
-    u_t = ctx.session["u_t"]
-    devices = ctx.session["user"]["devices"]
-    challenge = ctx.session["challenge"]
+    temp_pk = ctx.session.temp_pk
+    devices = ctx.session.user.devices
+    challenge = ctx.session.challenge
 
     authenticated = False
     matched_device = None
@@ -183,7 +121,7 @@ def handle_auth_response(ctx: ConnContext, msg: dict, p: int, g: int):
         except (ValueError, TypeError):
             continue
         left = pow(g, alpha_z, p)
-        right = (u_t * pow(pk, challenge, p)) % p
+        right = (temp_pk * pow(pk, challenge, p)) % p
         if left == right:
             authenticated = True
             matched_device = device
@@ -191,35 +129,17 @@ def handle_auth_response(ctx: ConnContext, msg: dict, p: int, g: int):
 
     if authenticated:
         ctx.send_message(MessageType.ACCEPTED)
-        print(f"[SERVER] User {ctx.session["user"]["_id"]} autenticato dal dispositivo {matched_device.get('device_name') if matched_device else 'unknown'}")
+        ctx.update_session(logged_device=matched_device["device_name"], login_time=datetime.now())        
+        ctx.session.user.update_user_login(ctx.session.logged_device)
+
+        print(f"[SERVER] User {ctx.session.user._id} autenticato dal dispositivo {ctx.session.logged_device}" if matched_device else "'unknown'")
     else:
         ctx.send_message(MessageType.REJECTED)
         print("[SERVER] Autenticazione rifiutata")
 
 
-# Token pairing: semplice implementazione (aggiungi expiry se vuoi)
-def save_token_pk(token: str, pk: str, device_name: str):
-    temp_token_collection = db["temp_tokens"]
-    token_doc = {
-        "_id": token,
-        "pk": pk,
-        "device_name": device_name,
-        "created_at": datetime.now(),
-        "expiry": datetime.now() + timedelta(minutes=10)
-    }
-    temp_token_collection.insert_one(token_doc)
-
-
-def get_info_from_token(token: str):
-    temp_token_collection = db["temp_tokens"]
-    token_doc = temp_token_collection.find_one({"_id": token})
-    if token_doc:
-        return token_doc["pk"], token_doc.get("device_name")
-    else:
-        return None, None
-
-
 def handle_assoc_request(ctx: ConnContext, msg: dict):
+    # TODO: input validation and token_length??
     token_length = 32
     pk = msg.get("pk")
     device_name = msg.get("device")
@@ -228,6 +148,7 @@ def handle_assoc_request(ctx: ConnContext, msg: dict):
         ctx.send_error(ErrorType.MALFORMED_MESSAGE)
         return
 
+    # token = generate_token()
     nonce = os.urandom(16).hex()
     token_raw = f"{pk}{device_name or ''}{nonce}"
     token = hashlib.sha256(token_raw.encode()).hexdigest()[:token_length]
@@ -235,7 +156,9 @@ def handle_assoc_request(ctx: ConnContext, msg: dict):
     print(f"[SERVER] Hashed Token: {token}")
 
     ctx.send_message(MessageType.TOKEN_ASSOC, {"token": token})
-    save_token_pk(token, pk, device_name or "")
+    
+    temp_token = TempToken(token, pk, device_name)
+    temp_token.insert_temp_token()
     
     register_connection(token, ctx)
     
@@ -244,11 +167,22 @@ def handle_assoc_request(ctx: ConnContext, msg: dict):
 
 def handle_assoc_confirm(ctx: ConnContext, msg: dict):
     token = msg.get("token")
+    
+    # TODO: TempToken.find_pk_by_id(token) ritorna un'istanza di TempToken e non un dict
+    temp_token = TempToken.find_pk_by_id(token)
+
+    pk, device_name = temp_token["pk"], temp_token["device_name"]
+    
+    for device in ctx.session.user.devices: 
+        if device["device_name"] == device_name and not device_name["main_device"]: 
+            ctx.send_error(ErrorType.NO_MAIN_DEVICE)
+            return
+    
     if not token:
         ctx.send_error(ErrorType.MALFORMED_MESSAGE)
         return
 
-    pk, device_name = get_info_from_token(token)
+    # TODO: controllare se il token è scaduto
     if not pk:
         ctx.send_error(ErrorType.TOKEN_INVALID_OR_EXPIRED)
         return
@@ -257,33 +191,26 @@ def handle_assoc_confirm(ctx: ConnContext, msg: dict):
         ctx.send_error(ErrorType.SESSION_NOT_FOUND)
         return
 
-    username = ctx.session["user"]["_id"]
-    users_collection = db["users"]
-    users_collection.update_one(
-        {"_id": username},
-        {
-            "$push": {
-                "devices": {
-                    "pk": pk,
-                    "device_name": device_name,
-                    "main_device": False,
-                    "logged": True,
-                }
-            }
-        },
-    )
+    user = ctx.session.user
+    
+    user.update_user_with_device(pk, device_name)
+    
+    ctx.update_session(user=user)
 
     # opzionale: rimuovere token dopo uso
     # db["temp_tokens"].delete_one({"_id": token})
 
     # Send ACCEPT message to main device
     ctx.send_message(MessageType.ACCEPTED)
-    print(f"[SERVER] Dispositivo associato a {username}: {device_name} ({pk[:20]}...)")
+    print(f"[SERVER] Dispositivo associato a {user._id}: {device_name} ({pk[:20]}...)")
 
     # Send ACCEPT message to second device
     s_ctx = get_connection(token)
+    
+    # TODO: thread lock?
+    s_ctx.update_session(user=user, logged_device=device_name, login_time=datetime.now())
     s_ctx.send_message(MessageType.ACCEPTED, {
-        "username": username
+        "username": user._id
     })
 
 
@@ -291,11 +218,13 @@ def handle_logout(ctx: ConnContext):
     # se session presente, invalida e chiudi
     if not ctx.is_session_empty:
         ctx.send_message(MessageType.LOGGED_OUT)
+        user = ctx.session.user
+        user.update_user_loggedout(ctx.session.logged_device)
+        ctx.clear_session()
         print("[SERVER] Logout effettuato con successo")
     else:
         ctx.send_error(ErrorType.SESSION_NOT_FOUND)
         print(f"[SERVER] Errore: {ErrorType.SESSION_NOT_FOUND.message()}")
-    ctx.close()
     return True
 
 
@@ -306,7 +235,7 @@ def handle_handshake(ctx: ConnContext, group_id: str):
         print(f"[SERVER] Connessione chiusa dal client {ctx.addr} o messaggio non valido")
         ctx.close()
         return
-    if res.get("status") == "received":
+    if res.get("type") == MessageType.HANDSHAKE_REQ.label:
         print(f"[SERVER] Handshake riuscito con {ctx.addr}")
 
 
@@ -335,9 +264,7 @@ def client_handler(ctx: ConnContext, p: int, g: int, q: int, group_id: str):
             elif msg_type == MessageType.TOKEN_ASSOC.label:
                 handle_assoc_confirm(ctx, msg)
             elif msg_type == MessageType.LOGOUT.label:
-                should_close = handle_logout(ctx)
-                if should_close:
-                    break
+                handle_logout(ctx)
             else:
                 print(f"[SERVER] Tipo messaggio sconosciuto: {msg_type}")
     except Exception as e:

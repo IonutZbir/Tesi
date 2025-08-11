@@ -41,6 +41,7 @@ class ErrorType(Enum):
     USERNAME_NOT_FOUND = (1, "USERNAME_NOT_FOUND", "Username non trovato")
     UNKNOWN_ERROR = (2, "UNKNOWN_ERROR", "Errore sconosciuto")
     SESSION_NOT_FOUND = (3, "SESSION_NOT_FOUND", "Sessione non trovata")
+    NO_MAIN_DEVICE = (4, "NO_MAIN_DEVICE", "L'abbinamento deve essere confirmato dal dispositivo principale")
 
     def __init__(self, code, label, log_message):
         self.code = code
