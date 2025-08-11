@@ -9,6 +9,7 @@ from utils.message import MessageType, ErrorType
 from utils.groups import GROUPS
 from utils.utils import get_linux_device_model
 
+
 # --- COSTANTI ---
 
 HOST = "192.168.1.168"
@@ -175,31 +176,30 @@ def association(sock: socket.socket, p: int, g: int, q: int) -> None:
 
     print("[CLIENT] Inviata richiesta di associazione del dispositivo")
 
-    res = receive_json(sock)
-    if res.get("type_code") == MessageType.TOKEN_ASSOC.code:
-        token = res.get("token")
-        print(f"[CLIENT] Token ricevuto dal server: {token}")
-        create_qr_code(token)
-    elif res.get("type_code") == MessageType.ERROR.code:
-        err = ErrorType.from_code(res.get("error_code"))
-        print(f"[CLIENT] Errore dal server: {err.message()}")
-    else:
-        print("[CLIENT] Risposta inattesa dal server:", res)
+    while True:
+        res = receive_json(sock)
+        if not res:
+            print("[CLIENT] Connessione chiusa dal server")
+            return False
+
+        type_code = res.get("type_code")
+        if type_code == MessageType.TOKEN_ASSOC.code:
+            token = res.get("token")
+            print(f"[CLIENT] Token ricevuto: {token}")
+            create_qr_code(token)
+        elif type_code == MessageType.ACCEPTED.code:
+            print("[CLIENT] Associazione completata, login effettuato!")
+            save_private_key(res.get("username"), alpha)
+            return True
+        elif type_code == MessageType.ERROR.code:
+            err = ErrorType.from_code(res.get("error_code"))
+            print(f"[CLIENT] Errore: {err.message()}")
+            return False
+        else:
+            print("[CLIENT] Messaggio sconosciuto:", res)
 
 
-def log_out(sock: socket.socket, p: int, g: int, q: int) -> None:
-    send_message(sock, MessageType.LOGOUT)
-    response = receive_json(sock)
-    if response.get("type_code") == MessageType.LOGGED_OUT.code:
-        print("[CLIENT] Logout effettuato con successo.")
-    elif response.get("type_code") == MessageType.ERROR.code:
-        err = ErrorType.from_code(response.get("error_code"))
-        print(f"[CLIENT] Errore dal server: {err.message()}")
-    else:
-        print("[CLIENT] Risposta inattesa dal server:", response)
-
-
-def confirm_association(sock: socket.socket, p: int, g: int, q: int) -> None:
+def confirm_association(sock: socket.socket) -> None:
     ans = input("[CLIENT] Inserisci codice di abbinamento: ").strip()
     # Supponiamo il messaggio da inviare sia tipo ASSOC_CONFIRM, definisci se serve e invia
     send_message(sock, MessageType.TOKEN_ASSOC, {"token": ans})
@@ -212,6 +212,19 @@ def confirm_association(sock: socket.socket, p: int, g: int, q: int) -> None:
         print(f"[CLIENT] Errore dal server: {err.message()}")
     else:
         print("[CLIENT] Risposta inattesa dal server:", response)
+
+
+def log_out(sock: socket.socket) -> None:
+    send_message(sock, MessageType.LOGOUT)
+    response = receive_json(sock)
+    if response.get("type_code") == MessageType.LOGGED_OUT.code:
+        print("[CLIENT] Logout effettuato con successo.")
+    elif response.get("type_code") == MessageType.ERROR.code:
+        err = ErrorType.from_code(response.get("error_code"))
+        print(f"[CLIENT] Errore dal server: {err.message()}")
+    else:
+        print("[CLIENT] Risposta inattesa dal server:", response)
+
 
 def handshake(sock: socket.socket):
     send_message(sock, MessageType.HANDSHAKE_REQ)
@@ -228,6 +241,7 @@ def handshake(sock: socket.socket):
         print("[CLIENT] Gruppo crittografico non supportato dal client.")
         return False
     return group
+
 
 # --- MAIN ---
 
@@ -279,7 +293,9 @@ def main():
                     if success:
                         logged_in = True
                 elif ans == "D":
-                    association(sock, p, g, q)
+                    success = association(sock, p, g, q)
+                    if success:
+                        logged_in = True
                 elif ans == "Q":
                     print("[CLIENT] Uscita dal client.")
                     break
@@ -288,7 +304,7 @@ def main():
                     log_out(sock, p, g, q)
                     logged_in = False
                 elif ans == "C":
-                    confirm_association(sock, p, g, q)
+                    confirm_association(sock)
                 elif ans == "Q":
                     print("[CLIENT] Uscita dal client.")
                     break

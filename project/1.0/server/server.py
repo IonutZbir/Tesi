@@ -16,7 +16,6 @@ from utils.message import MessageType, ErrorType
 from utils.groups import GROUPS
 from utils.db import db
 
-
 class ConnContext:
     MESSAGE_LENGTH = 4096
 
@@ -80,6 +79,21 @@ class ConnContext:
             payload["details"] = details
         self._send_json(payload)
 
+# --- Struttura globale per le connessioni attive ---
+active_connections = {}
+connections_lock = threading.Lock()
+
+def register_connection(identifier: str, ctx: ConnContext):
+    with connections_lock:
+        active_connections[identifier] = ctx
+
+def get_connection(identifier):
+    with connections_lock:
+        return active_connections.get(identifier)
+
+def remove_connection(identifier):
+    with connections_lock:
+        active_connections.pop(identifier, None)
 
 # ---------- handlers ----------
 
@@ -190,8 +204,8 @@ def save_token_pk(token: str, pk: str, device_name: str):
         "_id": token,
         "pk": pk,
         "device_name": device_name,
-        "created_at": datetime.now()
-        # aggiungi "expiry": datetime.utcnow() + timedelta(minutes=15) se vuoi TTL
+        "created_at": datetime.now(),
+        "expiry": datetime.now() + timedelta(minutes=10)
     }
     temp_token_collection.insert_one(token_doc)
 
@@ -222,6 +236,9 @@ def handle_assoc_request(ctx: ConnContext, msg: dict):
 
     ctx.send_message(MessageType.TOKEN_ASSOC, {"token": token})
     save_token_pk(token, pk, device_name or "")
+    
+    register_connection(token, ctx)
+    
     print(f"[SERVER] Salvata tupla: {token} - {pk[:20]}...")
 
 
@@ -257,10 +274,17 @@ def handle_assoc_confirm(ctx: ConnContext, msg: dict):
     )
 
     # opzionale: rimuovere token dopo uso
-    db["temp_tokens"].delete_one({"_id": token})
+    # db["temp_tokens"].delete_one({"_id": token})
 
+    # Send ACCEPT message to main device
     ctx.send_message(MessageType.ACCEPTED)
     print(f"[SERVER] Dispositivo associato a {username}: {device_name} ({pk[:20]}...)")
+
+    # Send ACCEPT message to second device
+    s_ctx = get_connection(token)
+    s_ctx.send_message(MessageType.ACCEPTED, {
+        "username": username
+    })
 
 
 def handle_logout(ctx: ConnContext):

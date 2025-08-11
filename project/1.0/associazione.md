@@ -247,3 +247,58 @@ Se usi più dispositivi, potresti voler:
 ---
 
 Se vuoi posso aiutarti a scrivere una versione di server o funzione di verifica che supporta più dispositivi per utente, così hai un esempio pratico completo. Vuoi?
+
+
+
+## Problema connessioni diverse
+
+Quello che descrivi è un problema classico di comunicazione server–client in cui i due dispositivi (P e A) non parlano direttamente tra loro, ma passano sempre attraverso il server.
+La difficoltà è che P e A sono gestiti da thread diversi, e quindi il server deve “riconoscere” quale connessione TCP corrisponde a quale dispositivo per potergli inviare messaggi successivi.
+
+In pratica, al momento in cui A si connette e invia la sua PK, devi memorizzare non solo i dati (PK, token) nel database, ma anche il socket o il contesto di connessione associato a quel dispositivo. In questo modo, quando P completa l’associazione, il server può andare a recuperare il socket di A e inviargli il messaggio di login.
+
+Supponiamo che tu abbia una classe ConnContext (come mi pare tu stia usando nel progetto) che contiene il socket e i dati della sessione.
+Puoi creare una struttura globale (ad esempio un dizionario protetto da lock) che mappa token → ConnContext oppure PK → ConnContext.
+
+# Struttura globale per tenere traccia delle connessioni attive
+active_connections = {}
+connections_lock = threading.Lock()
+
+def register_connection(identifier, context):
+    with connections_lock:
+        active_connections[identifier] = context
+
+def get_connection(identifier):
+    with connections_lock:
+        return active_connections.get(identifier)
+
+def remove_connection(identifier):
+    with connections_lock:
+        active_connections.pop(identifier, None)
+
+### FLusso
+
+A si connette
+
+    Invia PK.
+
+    Server genera token, lo memorizza nel DB insieme alla PK.
+
+    Registra active_connections[PK] = ConnContext o active_connections[token] = ConnContext.
+
+P si connette
+
+    Invia token al server.
+
+    Server recupera dal DB la PK associata a quel token.
+
+    Usa la PK per recuperare ConnContext di A da active_connections.
+
+    Se il socket di A è ancora valido, invia un messaggio diretto:
+    
+  ```python
+    ctx = get_connection(pk)
+    if ctx:
+    ctx.conn.send(json.dumps({"type": "login_success"}).encode())
+  ```
+  Poi invia anche il messaggio di successo a P.
