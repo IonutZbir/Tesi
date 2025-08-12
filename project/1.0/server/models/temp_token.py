@@ -7,7 +7,7 @@ class TempToken:
         self._id = token
         self.pk = pk
         self.device_name = device_name
-        self.created_at = datetime.now()
+        self.created_at = datetime.datetime.now()
         self.expiry = self.created_at + timedelta(minutes=10)
 
     def to_dict(self):
@@ -28,7 +28,7 @@ class TempToken:
 
     @property
     def is_expired(self):
-        return datetime.now() > self.expiry
+        return datetime.datetime.now() > self.expiry
 
     @staticmethod
     def delete_one(id: str):

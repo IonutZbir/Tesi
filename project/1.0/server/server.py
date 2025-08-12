@@ -101,7 +101,7 @@ def handle_registration(ctx: ConnContext, msg: dict):
 
     user.insert_user()
 
-    ctx.update_session(user=user, logged_device=device_name, login_time=datetime.now())
+    ctx.update_session(user=user, logged_device=device_name, login_time=datetime.datetime.now())
 
     ctx.send_message(MessageType.REGISTERED)
     if DEBUG:
@@ -189,7 +189,7 @@ def handle_auth_response(ctx: ConnContext, msg: dict, p: int, g: int):
     if authenticated:
         ctx.send_message(MessageType.ACCEPTED)
         ctx.update_session(
-            logged_device=matched_device["device_name"], login_time=datetime.now()
+            logged_device=matched_device["device_name"], login_time=datetime.datetime.now()
         )
         ctx.session.user.update_user_login(ctx.session.logged_device)
 
@@ -311,7 +311,7 @@ def handle_assoc_confirm(ctx: ConnContext, msg: dict):
     # Send ACCEPT message to second device
     # TODO: thread lock?
     s_ctx.update_session(
-        user=user, logged_device=device_name, login_time=datetime.now()
+        user=user, logged_device=device_name, login_time=datetime.datetime.now()
     )
     s_ctx.send_message(MessageType.ACCEPTED, {"username": user._id})
 
