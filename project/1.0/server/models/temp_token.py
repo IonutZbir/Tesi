@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+import datetime
 from utils.db import db
 
 
@@ -8,7 +8,7 @@ class TempToken:
         self.pk = pk
         self.device_name = device_name
         self.created_at = datetime.datetime.now()
-        self.expiry = self.created_at + timedelta(minutes=10)
+        self.expiry = self.created_at + datetime.timedelta(minutes=10)
 
     def to_dict(self):
         return {
