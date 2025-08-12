@@ -3,12 +3,12 @@ from utils.db import db
 
 
 class TempToken:
-    def __init__(self, token, pk, device_name):
+    def __init__(self, token, pk, device_name, created_at=None, expiry=None):
         self._id = token
         self.pk = pk
         self.device_name = device_name
-        self.created_at = datetime.datetime.now()
-        self.expiry = self.created_at + datetime.timedelta(minutes=10)
+        self.created_at = created_at or datetime.datetime.now()
+        self.expiry = expiry or (self.created_at + datetime.timedelta(minutes=10))
 
     def to_dict(self):
         return {
@@ -37,8 +37,8 @@ class TempToken:
 
     @classmethod
     def from_dict(cls, data: dict):
-        created_at = datetime.fromisoformat(data.get("created_at")) if isinstance(data.get("created_at"), str) else data.get("created_at")
-        expiry = datetime.fromisoformat(data.get("expiry")) if isinstance(data.get("expiry"), str) else data.get("expiry")
+        created_at = datetime.datetime.fromisoformat(data.get("created_at")) if isinstance(data.get("created_at"), str) else data.get("created_at")
+        expiry = datetime.datetime.fromisoformat(data.get("expiry")) if isinstance(data.get("expiry"), str) else data.get("expiry")
         return cls(
             token=data["_id"],
             pk=data["pk"],
