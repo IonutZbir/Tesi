@@ -41,7 +41,12 @@ class ErrorType(Enum):
     USERNAME_NOT_FOUND = (1, "USERNAME_NOT_FOUND", "Username non trovato")
     UNKNOWN_ERROR = (2, "UNKNOWN_ERROR", "Errore sconosciuto")
     SESSION_NOT_FOUND = (3, "SESSION_NOT_FOUND", "Sessione non trovata")
-    NO_MAIN_DEVICE = (4, "NO_MAIN_DEVICE", "L'abbinamento deve essere confirmato dal dispositivo principale")
+    NO_MAIN_DEVICE = (4, "NO_MAIN_DEVICE", "L'abbinamento deve essere confermato dal dispositivo principale")
+    MALFORMED_MESSAGE = (5, "MALFORMED_MESSAGE", "Messaggio malformato o campi mancanti")
+    TOKEN_INVALID_OR_EXPIRED = (6, "TOKEN_INVALID_OR_EXPIRED", "Token non valido o scaduto")
+    UNAUTHORIZED = (7, "UNAUTHORIZED", "Operazione non autorizzata")
+    DEVICE_ALREADY_REGISTERED = (8, "DEVICE_ALREADY_REGISTERED", "Il dispositivo risulta già registrato")
+    ASSOC_FAILURE = (9, "ASSOC_FAILURE", "Associazione del dispositivo non riuscita")
 
     def __init__(self, code, label, log_message):
         self.code = code
@@ -61,11 +66,3 @@ class ErrorType(Enum):
     def message(self):
         return self.log_message
 
-# Ottieni enum da codice
-# msg_type = MessageType.from_code(4)
-# print(msg_type)             # AUTH_REQUEST
-# print(msg_type.log())       # Ricevuta richiesta autenticazione
-
-# err = ErrorType.USERNAME_ALREADY_EXISTS
-# print(err)                  # USERNAME_ALREADY_EXISTS
-# print(err.message())        # Username già esistente

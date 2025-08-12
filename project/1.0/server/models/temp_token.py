@@ -3,8 +3,6 @@ from utils.db import db
 
 
 class TempToken:
-    db = db
-
     def __init__(self, token, pk, device_name):
         self._id = token
         self.pk = pk
@@ -26,21 +24,34 @@ class TempToken:
         Inserisce la coppia token - pk nel db
         """
         temp_tokens_collection = db["temp_tokens"]
-        temp_token_dict = self.to_dict()
-        temp_tokens_collection.insert_one(temp_token_dict)
+        temp_tokens_collection.insert_one(self.to_dict())
 
+    @property
+    def is_expired(self):
+        return datetime.now() > self.expiry
 
     @staticmethod
-    def find_pk_by_id(token: str) -> dict | None:
+    def delete_one(id: str):
+        temp_tokens_collection = db["temp_tokens"]
+        temp_tokens_collection.delete_one({"_id": id})
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        created_at = datetime.fromisoformat(data.get("created_at")) if isinstance(data.get("created_at"), str) else data.get("created_at")
+        expiry = datetime.fromisoformat(data.get("expiry")) if isinstance(data.get("expiry"), str) else data.get("expiry")
+        return cls(
+            token=data["_id"],
+            pk=data["pk"],
+            device_name=data["device_name"],
+            created_at=created_at,
+            expiry=expiry
+        )
+
+    @classmethod
+    def find_pk_by_id(cls, token: str) -> "TempToken | None":
         """
         Trova la coppia token - pk dato il token MongoDB per l'id.
-
-        Args:
-            id (str): token del dispositivo.
-
-        Returns:
-            dict | None: dizionario con i dati oppure None se non esiste.
         """
         temp_tokens_collection = db["temp_tokens"]
-        return temp_tokens_collection.find_one({"_id": token})
-        
+        data = temp_tokens_collection.find_one({"_id": token})
+        return cls.from_dict(data) if data else None

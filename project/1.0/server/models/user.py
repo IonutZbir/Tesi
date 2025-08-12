@@ -67,7 +67,7 @@ class User:
     def from_dict(cls, data: dict):
         user = cls(data["_id"])
         user.devices = data.get("devices", [])
-        user.created_at = data.get("created_at", datetime.datetime.utcnow().isoformat() + "Z")
+        user.created_at = data.get("created_at", datetime.datetime.now().isoformat())
         return user
 
     @classmethod
