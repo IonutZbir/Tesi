@@ -264,9 +264,10 @@ def handle_assoc_confirm(ctx: ConnContext, msg: dict):
         return
 
     devices = ctx.session.user.devices
+    logged_device = ctx.session.logged_device
 
     for device in devices:
-        if device["device_name"] == device_name and not device["main_device"]:
+        if device["device_name"] == logged_device and not device["main_device"]:
             ctx.send_error(ErrorType.NO_MAIN_DEVICE)
             if DEBUG:
                 logger.error(

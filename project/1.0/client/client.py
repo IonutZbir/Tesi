@@ -194,6 +194,7 @@ class ClientApp:
 
         if response.get("type_code") == MessageType.ACCEPTED.code:
             logger.info("[CLIENT] Autenticazione riuscita!")
+            logger.info(f"[CLIENT] Benvenuto {response.get("username")}!")
             return True
         elif response.get("type_code") == MessageType.REJECTED.code:
             logger.info("[CLIENT] Autenticazione fallita.")
@@ -233,6 +234,7 @@ class ClientApp:
 
         if response.get("type_code") == MessageType.ACCEPTED.code:
             logger.info("[CLIENT] Associazione completata, login effettuato!")
+            logger.info(f"[CLIENT] Benvenuto {response.get("username")}!")
             KeyManager.save_private_key(response.get("username"), alpha)
             return True
 

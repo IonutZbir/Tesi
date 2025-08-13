@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+class ReqAssoc extends StatefulWidget {
+  const ReqAssoc({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  State<ReqAssoc> createState() => _ReqAssocState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _ReqAssocState extends State<ReqAssoc> {
   @override
   Widget build(BuildContext context) {
     return const Center(

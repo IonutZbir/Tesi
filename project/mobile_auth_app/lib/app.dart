@@ -6,10 +6,15 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const primary = Color(0xFF153146);
+    final colorScheme =
+        ColorScheme.fromSeed(seedColor: primary).copyWith(primary: primary);
+
     return MaterialApp(
       title: 'Schnorr Auth App',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
+        colorScheme: colorScheme,
+        useMaterial3: true,
       ),
       home: const MyHomePage(),
     );
