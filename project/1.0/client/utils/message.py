@@ -16,6 +16,8 @@ class MessageType(Enum):
     HANDSHAKE_REQ = (12, "HANDSHAKE_REQ", "Richiesta handshake")
     HANDSHAKE_RES = (13, "HANDSHAKE_RES", "Risposta handshake")
     LOGGED_OUT = (14, "LOGGED_OUT", "Logout effettuato")
+    DEVICES_REQUEST = (15, "DEVICES_REQUEST", "Richiesta elenco dispositivi")
+    DEVICES_RESPONSE = (16, "DEVICES_RESPONSE", "Risposta elenco dispositivi")
 
     def __init__(self, code, label, log_message):
         self.code = code
@@ -47,6 +49,7 @@ class ErrorType(Enum):
     UNAUTHORIZED = (7, "UNAUTHORIZED", "Operazione non autorizzata")
     DEVICE_ALREADY_REGISTERED = (8, "DEVICE_ALREADY_REGISTERED", "Il dispositivo risulta già registrato")
     ASSOC_FAILURE = (9, "ASSOC_FAILURE", "Associazione del dispositivo non riuscita")
+
 
     def __init__(self, code, label, log_message):
         self.code = code

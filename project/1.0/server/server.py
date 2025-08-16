@@ -316,6 +316,30 @@ def handle_assoc_confirm(ctx: ConnContext, msg: dict):
     )
     s_ctx.send_message(MessageType.ACCEPTED, {"username": user._id})
 
+def handle_devices_request(ctx: ConnContext, msg: dict):
+    if ctx.is_session_empty:
+        ctx.send_error(ErrorType.SESSION_NOT_FOUND)
+        if DEBUG:
+            logger.debug("[SERVER] Richiesta dispositivi senza sessione attiva")
+        return
+
+    user = ctx.session.user
+    devices = user.devices
+
+    # Rimuovi eventuali chiavi sensibili prima di inviare
+    devices_info = [
+        {
+            "device_name": device["device_name"],
+            "main_device": device.get("main_device", False),
+            "logged": device.get("logged")
+        }
+        for device in devices
+    ]
+
+    ctx.send_message(MessageType.DEVICES_RESPONSE, {"devices": devices_info})
+    if DEBUG:
+        logger.debug(f"[SERVER] Lista dispositivi inviata a {user._id}")
+
 
 def handle_logout(ctx: ConnContext):
     # se session presente, invalida e chiudi
@@ -342,7 +366,7 @@ def handle_handshake(ctx: ConnContext, group_id: str):
         )
         ctx.close()
         return
-    if res.get("type") == MessageType.HANDSHAKE_REQ.label:
+    if res.get("type") == MessageType.HANDSHAKE_RES.label:
         logger.info(f"[SERVER] Handshake riuscito con {ctx.addr}")
 
 
@@ -371,6 +395,8 @@ def client_handler(ctx: ConnContext, p: int, g: int, q: int, group_id: str):
                 handle_assoc_request(ctx, msg)
             elif msg_type == MessageType.TOKEN_ASSOC.label:
                 handle_assoc_confirm(ctx, msg)
+            elif msg_type == MessageType.DEVICES_REQUEST.label:
+                handle_devices_request(ctx, msg)
             elif msg_type == MessageType.LOGOUT.label:
                 handle_logout(ctx)
             else:
