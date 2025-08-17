@@ -8,7 +8,6 @@ class SocketService {
   final String host;
   final int port;
   final void Function(Map<String, dynamic> message)? onMessage;
-  final Future<void> Function() onConnect;
 
   // coda dei messaggi ricevuti
   final List<Map<String, dynamic>> _messageQueue = [];
@@ -17,7 +16,6 @@ class SocketService {
     required this.host,
     required this.port,
     this.onMessage,
-    required this.onConnect,
   });
 
   /// Connessione al server
@@ -38,8 +36,6 @@ class SocketService {
         print('[SOCKET ERROR]: $error');
       });
 
-      // notifica la connessione avvenuta
-      await onConnect();
     } catch (e) {
       print('[SOCKET ERROR]: Errore durante la connessione -> $e');
     }

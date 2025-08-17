@@ -226,7 +226,6 @@ class AuthService {
     if (confirmResponse['type_code'] == MessageType.accepted.code) {
       final username = confirmResponse['username'];
 
-      // TODO: messaggi nella snack bar
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -245,6 +244,36 @@ class AuthService {
     }
 
     // se riceve errore o risposta inattesa
+    return false;
+  }
+
+  Future<bool> confirmAssoc(BuildContext context, String token) async {
+    // Invia token al server
+    _socketService.send(MessageType.tokenAssoc, extraData: {"token": token});
+
+    print("[CLIENT] token inviato $token");
+
+    // Attendi risposta dal server
+    final response = await waitForResponse({MessageType.accepted.code, MessageType.error.code});
+    if (response == null) return false;
+
+    if (response['type_code'] == MessageType.accepted.code) {
+      print("[CLIENT] Abbinamento confermato con successo.");
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text("Abbinamento confermato con successo!"), duration: Duration(seconds: 2)),
+        );
+
+      return true;
+    }
+
+    // Caso di errore o risposta inattesa
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text("Errore durante l'abbinamento."), duration: Duration(seconds: 2)));
+
     return false;
   }
 

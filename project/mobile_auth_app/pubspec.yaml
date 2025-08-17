@@ -17,6 +17,8 @@ dependencies:
   path_provider: ^2.1.5 
   path: ^1.9.1
   qr_flutter: ^4.1.0
+  flutter_launcher_icons: ^0.14.4
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:
@@ -27,3 +29,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  min_sdk_android: 21
