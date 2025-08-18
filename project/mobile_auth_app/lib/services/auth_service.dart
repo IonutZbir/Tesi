@@ -10,315 +10,183 @@ import 'package:schnorr_auth_app/utils/key_manager.dart';
 import 'package:schnorr_auth_app/utils/utils.dart';
 import 'package:schnorr_auth_app/widgets/connected_devices.dart';
 
+/// Risultato di un’operazione di autenticazione/registrazione
+class AuthResult {
+  final bool success;
+  final String? message;
+
+  AuthResult.success() : success = true, message = null;
+  AuthResult.failure(this.message) : success = false;
+}
+
 class AuthService {
   final SocketService _socketService;
 
-  BigInt? p;
-  BigInt? g;
-  BigInt? q;
+  BigInt? p, g, q;
 
   AuthService(this._socketService);
 
-  /// Handshake iniziale con il server
-  Future<bool> handshake() async {
-    // 1. Mando richiesta handshake
+  // --- HANDSHAKE ---
+  Future<AuthResult> handshake() async {
     _socketService.send(MessageType.handshakeReq);
-
-    print("[CLIENT] Richiesta di handshake inviata al server...");
-
-    // 2. Aspetto la risposta del server
     final response = await _socketService.receiveOnce();
+
     if (response == null) {
-      print("[CLIENT] Nessuna risposta dal server.");
-      return false;
+      return AuthResult.failure("Nessuna risposta dal server");
     }
 
-    print("[CLIENT] Fase di handshake... risposta ricevuta: $response");
-
-    // 3. Verifico che la risposta sia di tipo GROUP_SELECTION
-    if (response["type_code"] == MessageType.groupSelection.code) {
-      final group = response["group_id"];
-      print("[CLIENT] Gruppo selezionato dal server: $group");
-
-      if (!groups.containsKey(group)) {
-        print("[CLIENT] Gruppo crittografico non supportato.");
-        return false;
-      }
-
-      // prendi direttamente i parametri come BigInt
-      p = groups[group]!["p"]!;
-      g = groups[group]!["g"]!;
-      q = (p! - BigInt.one) ~/ BigInt.two;
-
-      // invio HANDSHAKE_RES
-      _socketService.send(MessageType.handshakeRes);
-
-      return true;
+    if (response["type_code"] != MessageType.groupSelection.code) {
+      return AuthResult.failure("Handshake fallito: risposta inattesa");
     }
 
-    return false;
+    final group = response["group_id"];
+    if (!groups.containsKey(group)) {
+      return AuthResult.failure("Gruppo crittografico non supportato");
+    }
+
+    p = groups[group]!["p"]!;
+    g = groups[group]!["g"]!;
+    q = (p! - BigInt.one) ~/ BigInt.two;
+
+    _socketService.send(MessageType.handshakeRes);
+    return AuthResult.success();
   }
 
-  /// Registrazione dell'utente
-  Future<bool> register(String username, BuildContext context) async {
-    if (p == null || g == null || q == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Parametri crittografici non inizializzati")));
-      return false;
+  // --- REGISTRAZIONE ---
+  Future<AuthResult> register(String username) async {
+    if (!_checkParams()) {
+      return AuthResult.failure("Parametri crittografici non inizializzati");
     }
 
     try {
-      // Genera alpha casuale
       final alpha = randomBigInt(q!);
-
-      // Nome del dispositivo
       final deviceName = await getDeviceName();
-
-      // Calcola chiave pubblica
       final publicKey = g!.modPow(alpha, p!).toRadixString(16);
 
-      // Prepara il messaggio
       final payload = {"username": username, "public_key": publicKey, "device": deviceName};
-
-      // Invia al server
       _socketService.send(MessageType.register, extraData: payload);
 
-      // Attende la risposta
       final response = await waitForResponse({MessageType.registered.code});
-
-      print("[SOCKET] $response");
-
-      if (response == null) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar
-          ..showSnackBar(
-            const SnackBar(content: Text("Nessuna risposta dal server"), duration: const Duration(seconds: 2)),
-          );
-        return false;
+      if (response == null || response.containsKey("error")) {
+        return AuthResult.failure(response?["error"] ?? "Registrazione fallita");
       }
 
-      if (response.containsKey("error")) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(content: Text(response["error"] ?? "Errore sconosciuto"), duration: const Duration(seconds: 2)),
-          );
-
-        return false;
-      }
-
-      // Registrazione riuscita
-
-      KeyManager.savePrivateKey(username, alpha);
-
-      return true;
+      await KeyManager.savePrivateKey(username, alpha);
+      return AuthResult.success();
     } catch (e) {
-      rethrow;
+      return AuthResult.failure("Errore durante la registrazione: $e");
     }
   }
 
-  /// Autenticazione dell'utente
-  Future<bool> authenticate(String username, BuildContext context) async {
-    // Carica la chiave privata salvata
+  // --- AUTENTICAZIONE ---
+  Future<AuthResult> authenticate(String username) async {
     final alpha = await KeyManager.loadPrivateKey(username);
     if (alpha == null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar
-        ..showSnackBar(
-          const SnackBar(
-            content: Text("Chiave privata non trovata. Registrati prima!"),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      return false;
+      return AuthResult.failure("Chiave privata non trovata. Registrati prima!");
     }
 
-    // Genera alpha temporaneo casuale
     final alphaT = randomBigInt(q!);
-
-    // Calcola u_t = g^alphaT mod p
     final uT = g!.modPow(alphaT, p!);
 
-    // Invia AUTH_REQUEST al server
-    _socketService.send(MessageType.authRequest, extraData: {"username": username, "temp": uT.toRadixString(16)});
+    _socketService.send(MessageType.authRequest, extraData: {
+      "username": username,
+      "temp": uT.toRadixString(16),
+    });
 
-    // Attende la challenge dal server
-    final challengeMsg = await waitForResponse({MessageType.challenge.code});
-    if (challengeMsg == null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text("Nessuna challenge ricevuta dal server."), duration: const Duration(seconds: 2)),
-        );
-      return false;
+    final challengeMsg = await waitForResponse({MessageType.challenge.code, MessageType.error.code});
+    if (challengeMsg == null || challengeMsg["type_code"] == MessageType.error.code) {
+      return AuthResult.failure(challengeMsg?["error"] ?? "Errore dal server");
     }
 
-    final hexStr = challengeMsg["challenge"].trim().substring(2);
+    final challengeHex = challengeMsg["challenge"];
+    if (challengeHex == null) return AuthResult.failure("Challenge mancante");
+
+    final hexStr = challengeHex.toString().trim().substring(2);
     final c = BigInt.parse(hexStr, radix: 16);
 
-    // Calcola la risposta alphaZ = (alphaT + alpha * c) % q
     final alphaZ = (alphaT + alpha * c) % q!;
-
-    // Invia AUTH_RESPONSE al server
     _socketService.send(MessageType.authResponse, extraData: {"response": alphaZ.toRadixString(16)});
 
-    // Attende accettazione o rifiuto
     final finalResponse = await waitForResponse({MessageType.accepted.code, MessageType.rejected.code});
+    if (finalResponse == null) return AuthResult.failure("Nessuna risposta finale dal server");
 
-    if (finalResponse == null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text("Nessuna risposta finale dal server."), duration: const Duration(seconds: 2)),
-        );
-      return false;
-    }
-
-    if (finalResponse["type_code"] == MessageType.accepted.code) {
-      return true;
-    } else if (finalResponse["type_code"] == MessageType.rejected.code) {
-      return false;
-    }
-
-    return false;
+    return finalResponse["type_code"] == MessageType.accepted.code
+        ? AuthResult.success()
+        : AuthResult.failure("Autenticazione rifiutata");
   }
 
-  /// Associazione del dispositivo
-  Future<bool> assoc(BuildContext context) async {
-    if (p == null || g == null || q == null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text("Parametri crittografici non inizializzati"), duration: Duration(seconds: 2)),
-        );
-      return false;
+  // --- ASSOCIAZIONE ---
+  Future<AuthResult> assoc(BuildContext context) async {
+    if (!_checkParams()) {
+      return AuthResult.failure("Parametri crittografici non inizializzati");
     }
 
     final deviceName = await getDeviceName();
-
-    // Genera alpha casuale
     final alpha = randomBigInt(q!);
-
-    // Calcola la chiave pubblica: g^alpha mod p
     final publicKey = g!.modPow(alpha, p!);
 
-    // Invia richiesta di associazione
-    final payload = {"device": deviceName, "pk": publicKey.toRadixString(16)};
-    _socketService.send(MessageType.assocRequest, extraData: payload);
+    _socketService.send(MessageType.assocRequest, extraData: {
+      "device": deviceName,
+      "pk": publicKey.toRadixString(16),
+    });
 
-    // Primo step: attendere il token da mostrare come QR
     final tokenResponse = await waitForResponse({MessageType.tokenAssoc.code, MessageType.error.code});
-    if (tokenResponse == null) return false;
-
-    if (tokenResponse['type_code'] == MessageType.tokenAssoc.code) {
-      final token = tokenResponse['token'];
-
-      Provider.of<SessionManager>(context, listen: false).token = token;
-
-      print("[CLIENT] Token ricevuto: $token");
+    if (tokenResponse == null || tokenResponse["type_code"] != MessageType.tokenAssoc.code) {
+      return AuthResult.failure("Errore durante l'associazione (token non ricevuto)");
     }
 
-    // Secondo step: attendere conferma di associazione
+    Provider.of<SessionManager>(context, listen: false).token = tokenResponse['token'];
+
     final confirmResponse = await waitForResponse({MessageType.accepted.code, MessageType.error.code});
-    if (confirmResponse == null) return false;
-
-    if (confirmResponse['type_code'] == MessageType.accepted.code) {
-      final username = confirmResponse['username'];
-
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text("Associazione completata, benvenuto $username!"),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-
-      Provider.of<SessionManager>(context, listen: false).login(username);
-
-      print("[CLIENT] Associazione completata, login effettuato!");
-      print("[CLIENT] Benvenuto $username!");
-      await KeyManager.savePrivateKey(username, alpha);
-      return true;
+    if (confirmResponse == null || confirmResponse['type_code'] != MessageType.accepted.code) {
+      return AuthResult.failure("Errore durante l'associazione (nessuna conferma)");
     }
 
-    // se riceve errore o risposta inattesa
-    return false;
+    final username = confirmResponse['username'];
+    Provider.of<SessionManager>(context, listen: false).login(username);
+
+    await KeyManager.savePrivateKey(username, alpha);
+    return AuthResult.success();
   }
 
-  Future<bool> confirmAssoc(BuildContext context, String token) async {
-    // Invia token al server
+  // --- CONFERMA ASSOCIAZIONE ---
+  Future<AuthResult> confirmAssoc(String token) async {
     _socketService.send(MessageType.tokenAssoc, extraData: {"token": token});
-
-    print("[CLIENT] token inviato $token");
-
-    // Attendi risposta dal server
     final response = await waitForResponse({MessageType.accepted.code, MessageType.error.code});
-    if (response == null) return false;
 
-    if (response['type_code'] == MessageType.accepted.code) {
-      print("[CLIENT] Abbinamento confermato con successo.");
-
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text("Abbinamento confermato con successo!"), duration: Duration(seconds: 2)),
-        );
-
-      return true;
+    if (response == null || response['type_code'] != MessageType.accepted.code) {
+      return AuthResult.failure("Errore durante la conferma di associazione");
     }
 
-    // Caso di errore o risposta inattesa
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text("Errore durante l'abbinamento."), duration: Duration(seconds: 2)));
-
-    return false;
+    return AuthResult.success();
   }
 
-  /// Recupera i dispositivi associati ad un username dal server
+  // --- DISPOSITIVI ASSOCIATI ---
   Future<List<DeviceInfo>?> fetchAssociatedDevices(String username) async {
-    // Invia la richiesta al server
     _socketService.send(MessageType.devicesRequest, extraData: {"username": username});
-
-    // Attende la risposta
     final response = await waitForResponse({MessageType.devicesResponse.code});
 
-    if (response == null || response.containsKey("error")) {
-      print("[CLIENT] Errore nel recupero dei dispositivi: ${response?["error"]}");
-      return null;
-    }
+    if (response == null || response.containsKey("error")) return null;
 
-    if (response["type_code"] == MessageType.devicesResponse.code) {
-      final devices = response["devices"];
-      if (devices is List) {
-        try {
-          // Converto ogni elemento della lista in DeviceInfo
-          return devices.map((d) {
-            return DeviceInfo(
-              deviceName: d["device_name"] ?? "Sconosciuto",
-              mainDevice: d["main_device"] ?? "",
-              isLoggedIn: d["logged"] ?? "",
-            );
-          }).toList();
-        } catch (e) {
-          print("[CLIENT] Errore parsing devices: $e");
-          return null;
-        }
-      }
-    }
+    final devices = response["devices"];
+    if (devices is! List) return null;
 
-    return null;
+    return devices.map((d) {
+      return DeviceInfo(
+        deviceName: d["device_name"] ?? "Sconosciuto",
+        mainDevice: d["main_device"] ?? "",
+        isLoggedIn: d["logged"] ?? "",
+      );
+    }).toList();
   }
 
-  /// Attende un messaggio con type_code atteso, oppure gestisce ERROR
+  // --- HELPER ---
+  bool _checkParams() => p != null && g != null && q != null;
+
   Future<Map<String, dynamic>?> waitForResponse(Set<int> expectedTypes) async {
     while (true) {
       final msg = await _socketService.receiveOnce();
-      if (msg == null) {
-        return {"error": "Connessione chiusa o messaggio vuoto"};
-      }
+      if (msg == null) return {"error": "Connessione chiusa o messaggio vuoto"};
 
       final typeCode = msg['type_code'];
       if (typeCode == null) continue;

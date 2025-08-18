@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import '../models/messageType.dart';
@@ -19,27 +20,37 @@ class SocketService {
   });
 
   /// Connessione al server
-  Future<void> connect() async {
-    try {
-      _socket = await Socket.connect(host, port);
+Future<bool> connect({Duration timeout = const Duration(seconds: 3)}) async {
+  try {
+    _socket = await Socket.connect(host, port).timeout(
+      timeout,
+      onTimeout: () => throw TimeoutException('Timeout connessione'),
+    );
 
-      print('[SOCKET]: Connessione aperta verso $host:$port');
+    print('[SOCKET]: Connessione aperta verso $host:$port');
 
-      // Trasforma lo stream in broadcast così possiamo ascoltarlo più volte
-      _socketStream = _socket!.asBroadcastStream();
+    // Trasforma lo stream in broadcast così possiamo ascoltarlo più volte
+    _socketStream = _socket!.asBroadcastStream();
 
-      // ascolta i messaggi in arrivo e mettili nella coda
-      _socketStream.listen(_onData, onDone: () {
+    // ascolta i messaggi in arrivo e mettili nella coda
+    _socketStream.listen(
+      _onData,
+      onDone: () {
         print('[SOCKET]: Connessione chiusa dal server');
         dispose();
-      }, onError: (error) {
+      },
+      onError: (error) {
         print('[SOCKET ERROR]: $error');
-      });
+        dispose();
+      },
+    );
 
-    } catch (e) {
-      print('[SOCKET ERROR]: Errore durante la connessione -> $e');
-    }
+    return true; // connessione riuscita
+  } catch (e) {
+    print('[SOCKET ERROR]: Errore durante la connessione -> $e');
+    return false; // connessione fallita
   }
+}
 
   void _onData(List<int> data) {
     try {

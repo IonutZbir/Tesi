@@ -25,23 +25,25 @@ class _QrCodeScannerPageState extends State<QrCodeScannerPage> {
     setState(() => _isProcessing = true);
     _controller.stop();
 
-    widget.authService.confirmAssoc(context, token);
-
-    print('[CLIENT]: Token letto: $token');
+    widget.authService.confirmAssoc(token);
+    debugPrint('[CLIENT]: Token letto: $token');
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text("Token letto: $token"),
         backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 2),
       ),
     );
 
+    _resetScannerAfterDelay();
+  }
+
+  void _resetScannerAfterDelay() {
     Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        _controller.start();
-        setState(() => _isProcessing = false);
-      }
+      if (!mounted) return;
+      _controller.start();
+      setState(() => _isProcessing = false);
     });
   }
 
@@ -54,21 +56,22 @@ class _QrCodeScannerPageState extends State<QrCodeScannerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Qr Scanner')),
+      appBar: AppBar(title: const Text('Scanner QR')),
       body: Stack(
         children: [
-          // Scanner
+          // Scanner camera
           MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
           ),
-          // Overlay
+
+          // Overlay grafico
           Column(
             children: [
               const SizedBox(height: 40),
               Center(
                 child: Text(
-                  "Scannerizza il codice",
+                  "Inquadra il QR Code",
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -93,13 +96,24 @@ class _QrCodeScannerPageState extends State<QrCodeScannerPage> {
                       color: Colors.red,
                       width: 3,
                     ),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
               ),
               const Spacer(),
             ],
           ),
+
+          // Loader se in elaborazione
+          if (_isProcessing)
+            Container(
+              color: Colors.black54,
+              child: const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                ),
+              ),
+            ),
         ],
       ),
     );

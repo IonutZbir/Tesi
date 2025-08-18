@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart';
+import 'package:schnorr_auth_app/widgets/button.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:schnorr_auth_app/models/session_manager.dart';
@@ -48,28 +49,45 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _initSocket() async {
-    final socket = SocketService(
-      host: _serverIp,
-      port: _serverPort,
-      onMessage: (msg) {
-        debugPrint("[SOCKET]: Messaggio ricevuto -> $msg");
-      },
-    );
+    try {
+      final socket = SocketService(
+        host: _serverIp,
+        port: _serverPort,
+        onMessage: (msg) => debugPrint("[SOCKET]: $msg"),
+      );
 
-    await socket.connect();
+      final connected = await socket.connect().timeout(const Duration(seconds: 3), onTimeout: () => false);
 
-    final auth = AuthService(socket);
-    final ok = await auth.handshake();
+      if (!connected) {
+        _showSnack(context, "Impossibile connettersi al server ($_serverIp:$_serverPort)");
+        return;
+      }
 
-    if (!ok) {
-      debugPrint("[CLIENT] Handshake fallito!");
+      final auth = AuthService(socket);
+
+      final success = await auth.handshake().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          _showSnack(context, "Handshake scaduto");
+          return AuthResult.failure("Handshake scaduto");
+        },
+      );
+
+      if (!success.success) {
+        _showSnack(context, "Handshake fallito");
+      }
+
+      setState(() {
+        _socketService = socket;
+        _authService = auth;
+      });
+    } catch (e) {
+      _showSnack(context, "Errore di connessione: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _isInitialized = true);
+      }
     }
-
-    setState(() {
-      _socketService = socket;
-      _authService = auth;
-      _isInitialized = true;
-    });
   }
 
   void _restartSocket(String newIp, int newPort) {
@@ -78,6 +96,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _serverIp = newIp;
       _serverPort = newPort;
       _isInitialized = false;
+      _authService = null;
     });
     _initSocket();
   }
@@ -114,29 +133,27 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _handleAssoc(SessionManager session) async {
     if (_authService == null) return;
-    final success = await _authService!.assoc(context);
-    if (success) {
+    final result = await _authService!.assoc(context);
+    if (!mounted) return;
+
+    if (result.success) {
       setState(() => _selectedIndex = 0);
+    } else {
+      _showSnack(context, result.message ?? "Associazione fallita");
     }
   }
 
   List<Widget> _buildPages(SessionManager session) {
-    final isMobile = defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS;
+    final isMobile = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
 
     if (session.isLoggedIn) {
       return [
         DevicesListWidget(username: session.username ?? "", devices: _devices),
-        isMobile
-            ? QrCodeScannerPage(authService: _authService!)
-            : TokenInputPage(authService: _authService!),
-        const SizedBox.shrink(), // Logout
+        isMobile ? QrCodeScannerPage(authService: _authService!) : TokenInputPage(authService: _authService!),
+        const SizedBox.shrink(),
       ];
     } else {
-      return [
-        RegistrationPage(authService: _authService!),
-        ReqAssoc(authService: _authService!),
-      ];
+      return [RegistrationPage(authService: _authService!), ReqAssoc(authService: _authService!)];
     }
   }
 
@@ -144,23 +161,24 @@ class _MyHomePageState extends State<MyHomePage> {
     if (session.isLoggedIn) {
       return [
         const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-        if (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS)
-          const BottomNavigationBarItem(
-              icon: Icon(Icons.qr_code_scanner), label: 'Scanner')
+        if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)
+          const BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner), label: 'Scanner')
         else
-          const BottomNavigationBarItem(
-              icon: Icon(Icons.keyboard), label: 'Inserisci Token'),
+          const BottomNavigationBarItem(icon: Icon(Icons.keyboard), label: 'Inserisci Token'),
         const BottomNavigationBarItem(icon: Icon(Icons.logout), label: 'Logout'),
       ];
     } else {
       return const [
-        BottomNavigationBarItem(
-            icon: Icon(Icons.app_registration), label: 'Registrazione'),
-        BottomNavigationBarItem(
-            icon: Icon(Icons.devices), label: 'Associa Dispositivo'),
+        BottomNavigationBarItem(icon: Icon(Icons.app_registration), label: 'Registrazione'),
+        BottomNavigationBarItem(icon: Icon(Icons.devices), label: 'Associa Dispositivo'),
       ];
     }
+  }
+
+  void _showSnack(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 2)));
   }
 
   @override
@@ -168,8 +186,61 @@ class _MyHomePageState extends State<MyHomePage> {
     final session = Provider.of<SessionManager>(context);
 
     if (!_isInitialized) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_authService == null) {
+      // Server non disponibile → schermata di errore con retry
+      return Scaffold(
+        appBar: AppBar(
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsPage(initialIp: _serverIp, initialPort: _serverPort),
+                  ),
+                );
+                if (result != null && result is Map<String, dynamic>) {
+                  final newIp = result['ip'] as String;
+                  final newPort = result['port'] as int;
+                  if (newIp != _serverIp || newPort != _serverPort) {
+                    _restartSocket(newIp, newPort);
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+                const Text(
+                "Impossibile collegarsi al server",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+                ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: 400,
+                child: ActionButton(
+                  label: 'RIPROVA',
+                  color: Theme.of(context).colorScheme.primary,
+                  textColor: Theme.of(context).colorScheme.onPrimary,
+                  onPressed: () {
+                    setState(() => _isInitialized = false);
+                    _initSocket();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -186,13 +257,9 @@ class _MyHomePageState extends State<MyHomePage> {
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => SettingsPage(
-                      initialIp: _serverIp,
-                      initialPort: _serverPort,
-                    ),
+                    builder: (_) => SettingsPage(initialIp: _serverIp, initialPort: _serverPort),
                   ),
                 );
-
                 if (result != null && result is Map<String, dynamic>) {
                   final newIp = result['ip'] as String;
                   final newPort = result['port'] as int;
