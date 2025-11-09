@@ -1,0 +1,50 @@
+\chapter*{INTRODUZIONE}
+\addcontentsline{toc}{chapter}{INTRODUZIONE}
+
+% - Incipit con sistemi password-based
+% - Obiettivo della tesi
+% - Argomento di studio
+% - Progetto
+
+I sistemi di autenticazione più utilizzati attualmente sono quelli password-based. L'accesso a un account – che si tratti di \textit{Instagram}, \textit{Gmail} o di un portale universitario – richiede l'inserimento di un identificativo (username, email o matricola) abbinato a una \textbf{password}, ovvero una stringa alfanumerica creata al momento della registrazione.
+
+In termini di \textit{user experience}, l'autenticazione basata su password risulta la soluzione più agevole, poiché richiede all'utente di memorizzare esclusivamente la password scelta in fase di registrazione. Nonostante ciò, il sistema è esposto a vulnerabilità: dalla perdita o dimenticanza della password, che impone una procedura di reimpostazione, fino alla possibilità che un attaccante la indovini (attacchi brute-force/enumerazione) o la intercetti, ottenendo accesso non autorizzato all'account.
+
+La presente tesi ha come obiettivo la progettazione di un sistema (client-server) di autenticazione privo di password, fondato sull'utilizzo di un protocollo \textbf{Zero Knowledge Proof}, concetto introdotto per la prima volta alla fine degli anni '80 da Shafi Goldwasser, Silvio Micali e Charles Rackoff nel documento \textit{The Knowledge Complexity of Interactive Proof-Systems} \cite{doi:10.1137/0218012}. In particolare, verrà trattato il \textbf{Protocollo di Identificazione di Schnorr} e la relativa \textbf{Firma Digitale}, ideato da Claus Peter Schnorr alla fine degli anni '80 nel documento \textit{Efficient signature generation by smart cards} \cite{Schnorr2005}. A differenza dei meccanismi password-based, l'approccio \textit{ZKP} elimina la necessità di comunicare la password a ogni accesso, riducendo sia la probabilità di dimenticanza da parte dell'utente sia l'esposizione a rischi di sicurezza.
+
+All'interno del protocollo d'identificazione di Schnorr, ciascun client dispone di una coppia di chiavi: la chiave pubblica $(pk := u)$ e la chiave segreta $(sk := \alpha)$.
+Per garantire la sicurezza del protocollo, sia contro attacchi diretti sia contro tentativi di intercettazione, vengono impiegate operazioni modulari all'interno del gruppo crittografico $\mathbb{Z}_p$, con $p$ scelto come numero primo. I gruppi utilizzati seguono le specifiche dello standard RFC 3526 \cite{rfc3526}, il che implica che le chiavi avranno una lunghezza variabile a seconda della classe scelta (fino a 2048 bit nel caso del gruppo \texttt{modp-2048}, e così via).
+
+Un punto cruciale è l'assunzione che il problema del logaritmo discreto (DL) sia computazionalmente \textbf{difficile} da risolvere. Si tratta di un problema matematico che, pur essendo facile da eseguire in una direzione, risulta estremamente complicato da invertire. Dato un gruppo moltiplicativo ciclico $G$ di ordine primo $q$, un generatore $g \in G$ e un elemento $u \in G$, il problema del logaritmo discreto consiste nel determinare l'esponente $\alpha \in \{0, \dots, q-1\}$ tale che 
+\[
+u = g^\alpha, \text{ dove } \alpha = \log_gu,
+\]
+dove $\alpha$ è appunto chiamato \textbf{logaritmo discreto} di $u$.
+
+Poiché questo problema è considerato intrattabile con gli attuali metodi noti anche qualora un malintenzionato riuscisse a intercettare la chiave pubblica ($pk := g^\alpha$), non sarebbe comunque in grado di risalire in tempi utili alla corrispondente chiave privata ($sk := \alpha$).
+
+Nel contesto di un protocollo di autenticazione si distinguono due entità principali: il \textbf{Prover} e il \textbf{Verifier}.
+Il \textit{Prover} rappresenta il client, ossia l'entità software che consente all'utente di autenticarsi, mentre il \textit{Verifier} rappresenta il server, il quale ha il compito di validare tale autenticazione. In uno scenario di autenticazione \textit{passwordless} non viene utilizzata alcuna password tradizionale. Al contrario, il \textit{Prover} deve dimostrare al \textit{Verifier} di possedere una determinata chiave segreta associata al proprio account, ma senza mai trasmetterla direttamente. 
+
+Il sistema sviluppato in questa tesi è basato sul \textbf{Protocollo di Autenticazione e Firma di Schnorr}. L'obiettivo è fornire un meccanismo di accesso sicuro che permetta all'utente di autenticarsi utilizzando esclusivamente il proprio \textit{username}, dimostrando il possesso della chiave segreta senza trasmetterla. Il sistema è implementato secondo un'architettura client-server, con un server sviluppato in \textit{Python} e un database \textit{MongoDB}, e prevede la gestione delle chiavi tramite operazioni di hashing (\texttt{SHA-256}) e cifratura (\texttt{AES-GCM}). Il protocollo di comunicazione, denominato \textbf{SAP (Schnorr-based Authentication Protocol)}, si articola in tre fasi principali: \textit{handshake}, \textit{registrazione/autenticazione} e \textit{accoppiamento di dispositivi}.
+
+% Paragrafo per descrivere in sistesi il sistema implementato
+
+Nonostante l'elevato livello di sicurezza garantito da questo approccio, nei sistemi reali si tende a preferire l'autenticazione tradizionale tramite password, ritenuta più agevole dal punto di vista della \textit{user experience}, pur a fronte della necessità di memorizzare la password stessa. Una delle principali criticità dei sistemi \textit{passwordless} risiede nel fatto che la chiave segreta è \textit{device-dependent/client-dependent}: essa deve infatti risiedere sul dispositivo o sul client utilizzato per l'accesso. Di conseguenza, la cancellazione accidentale della chiave da parte dell'utente comporterebbe l'impossibilità di autenticarsi. Uno degli obiettivi del sistema presentato in questa tesi è quello di mitigare tale limite introducendo un meccanismo di associazione di più dispositivi, sfruttando la \textbf{Firma Digitale di Schnorr}.
+
+In conclusione, è stata realizzata un'applicazione multi-platform (Android, Linux, Windows) con \textit{Flutter}, che, tramite un'interfaccia grafica, rende più semplice l'utilizzo del sistema di autenticazione, mentre il client Linux sviluppato in \textit{Python} è disponibile esclusivamente in versione \texttt{CLI} (riga di comando).
+
+La struttura del lavoro svolto è organizzata come segue:
+
+\begin{itemize}
+    \item \textbf{Capitolo 1 - Elementi di Aritmetica Modulare e Fondamenti di Crittografia} \\
+    In questo capitolo vengono presentate le nozioni fondamentali di aritmetica modulare (definizione di gruppo, sottogruppo, etc...), insieme ad alcuni concetti chiave della crittografia, come il problema del logaritmo discreto, che costituiscono la base teorica del lavoro.
+    \item \textbf{Capitolo 2 - Schnorr: Identificazione e Firma Digitale} \\
+    Viene presentato il concetto di protocollo \textit{Zero-Knowledge Proof} e, successivamente, viene analizzato nel dettaglio il protocollo di identificazione di Schnorr e il relativo schema di firma digitale.
+    \item \textbf{Capitolo 3 - Progetto Sperimentale - SchnorrAuthApp} \\
+    È dedicato allo sviluppo del sistema di autenticazione \textit{passwordless} progettato nell'ambito di questa tesi, basato sul protocollo di identificazione e firma di Schnorr, con descrizione dell'architettura, del protocollo di comunicazione e dell'applicazione Flutter sviluppata.
+    \item \textbf{Capitolo 4 - Conclusioni e Sviluppi Futuri} \\
+    Riassume i risultati ottenuti e presenta alcune considerazioni sulle possibili estensioni e sviluppi futuri del progetto.
+    \item \textbf{Appendice} \\
+    Contiene frammenti di codice e implementazioni ritenute significative per la comprensione del sistema sviluppato.
+\end{itemize}

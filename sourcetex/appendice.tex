@@ -1,0 +1,149 @@
+%=========================================================
+% APPENDICE
+%=========================================================
+\appendix
+\chapter[APPENDICE]{Codice sorgente}
+
+Questa appendice raccoglie il codice sorgente principale relativo alle componenti
+implementative del protocollo di autenticazione basato su Schnorr.  
+Le classi riportate rappresentano i moduli centrali per la gestione delle chiavi crittografiche
+e per l'esecuzione delle fasi di prova e verifica all'interno del protocollo.
+
+%---------------------------------------------------------
+\section{\texttt{KeyManager}}
+\label{sec:key_manager}
+%---------------------------------------------------------
+
+La classe \texttt{KeyManager} gestisce la memorizzazione sicura delle chiavi private
+degli utenti. Se viene fornita una password, la chiave viene cifrata con AES-GCM
+utilizzando una chiave derivata tramite Scrypt. In assenza di password, la chiave
+viene salvata in chiaro nel file system locale.
+
+\begin{listing}
+\begin{minted}[
+    frame=lines,
+    linenos,
+    breaklines,
+    fontsize=\fontsize{9pt}{11pt}\selectfont
+]{python}
+import os
+import cryptography
+from pathlib import Path
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+class KeyManager:
+    HOME_PATH = Path.home()
+    SCHNORR_DIR = HOME_PATH / ".schnorr"
+
+    @staticmethod
+    def _derive_key(password: str, salt: bytes) -> bytes:
+        """Deriva una chiave AES-256 (32 byte) usando PBKDF2-HMAC-SHA256"""
+        ...
+    
+    @classmethod
+    def save_private_key(cls, username: str, key: int, password: str = None) -> None:
+        cls.SCHNORR_DIR.mkdir(parents=True, exist_ok=True)
+        privkey_path = cls.SCHNORR_DIR / f"{username}_privkey.pem"
+
+        if not password:
+            cls._save_private_key(username, key)
+            return
+
+        data = str(key).encode()
+        salt, nonce = os.urandom(16), os.urandom(12)
+        aesgcm = AESGCM(cls._derive_key(password, salt))
+        ciphertext = aesgcm.encrypt(nonce, data, None)
+        with open(privkey_path, "wb") as f:
+            f.write(salt + nonce + ciphertext)
+
+    @classmethod
+    def load_private_key(cls, username: str, password: str = None) -> int:
+        privkey_path = cls.SCHNORR_DIR / f"{username}_privkey.pem"
+
+        if not password:
+            return cls._load_private_key(username)
+
+        with open(privkey_path, "rb") as f:
+            blob = f.read()
+        salt, nonce, ciphertext = blob[:16], blob[16:28], blob[28:]
+        aesgcm = AESGCM(cls._derive_key(password, salt))
+        plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+        return int(plaintext.decode())
+\end{minted}
+\caption{Implementazione della classe \texttt{KeyManager}.}
+\end{listing}
+
+%---------------------------------------------------------
+\section{\texttt{SchnorrProver} e \texttt{SchnorrVerifier}}
+\label{sec:schnorr_classi}
+%---------------------------------------------------------
+
+Le classi \texttt{SchnorrProver} e \texttt{SchnorrVerifier} implementano rispettivamente
+il ruolo del Prover e del Verifier nel protocollo di identificazione di Schnorr.
+La prima gestisce la generazione delle chiavi e la produzione della risposta,
+mentre la seconda verifica la validità della prova o della firma associata.
+
+\begin{listing}
+\begin{minted}[
+    frame=lines,
+    linenos,
+    breaklines,
+    fontsize=\fontsize{8.5pt}{10pt}\selectfont
+]{python}
+class Schnorr:
+    def __init__(self, group_id: GroupType):
+        self.crypto_group = Rfc3526(group_id)
+        self.p, self.g, self.q = self.crypto_group.get_params()
+        self.public_key, self.public_key_temp = None, None
+
+    def compute_challenge(self, message: int) -> int:
+        data = str(self.public_key_temp) + str(self.public_key) + message
+        return int(hashlib.sha256(data.encode()).hexdigest(), 16) % self.q
+
+class SchnorrProver(Schnorr):
+    def __init__(self, group_id: GroupType):
+        super().__init__(group_id, filename)
+        self.alpha, self.alpha_temp = None, None
+        
+    def public_key(self) -> int:
+        if self.public_key is None:
+            self.public_key = pow(self.g, self.alpha, self.p)
+        return self.public_key
+
+    def public_key_temp(self) -> int:
+        self.alpha_temp = random.randint(1, self.q - 1)
+        self.public_key_temp = pow(self.g, self.alpha_temp, self.p)
+        return self.public_key_temp
+
+    def gen_keys(self):
+        self.alpha = random.randint(1, self.q - 1)
+        self.public_key = pow(self.g, self.alpha, self.p)
+
+    def response(self, challenge: int) -> int:
+        return (self.alpha_temp + self.alpha * challenge) % self.q
+
+    def sign_message(self, message: str) -> dict[str, int]:
+        challenge = self.compute_challenge(message)
+        sign = {"public_key_temp": self.public_key_temp, "response": self.response(challenge)}
+        return sign
+        
+class SchnorrVerifier(Schnorr):
+    def __init__(self, group_id: GroupType):
+        super().__init__(group_id, filename)
+        self.challenge = random.randint(0, self._q - 1)
+
+    def check(self, response: int) -> bool:
+        left = pow(self.g, response, self.p)
+        right = (self.public_key_temp * pow(self.public_key, self.challenge, self.p)) % self.p
+        return left == right
+    
+    def verify_sign(self, sign: dict, message: str) -> bool:
+        self.public_key_temp = sign["public_key_temp"]
+        self.challenge = self.compute_challenge(message)
+        return self.check(sign["response"])
+\end{minted}
+\caption{Classi \texttt{SchnorrProver} e \texttt{SchnorrVerifier}.}
+\end{listing}
+
+\clearpage

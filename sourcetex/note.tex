@@ -1,0 +1,60 @@
+\begin{listing}[!ht]
+\begin{minted}[frame=lines, linenos, fontsize=\footnotesize]{Python}
+class SchnorrProver:
+    def __init__(self, group_id: GroupType):
+        self.crypto_group = Rfc3526(group_id)
+        self.p = self.crypto_group.p
+        self.g = self.crypto_group.g
+        self.q = self.crypto_group.q
+
+        self.public_key = None
+
+        @property
+        def public_key(self) -> int:
+            if self.public_key is None:
+                self.public_key = pow(self.g, self.alpha, self.p)
+            return self.public_key
+        
+        def gen_keys(self):
+            self.alpha = random.randint(1, self.q - 1)
+            self.public_key = pow(self.g, self.alpha, self.p)
+
+        @property
+        def public_key_temp(self) -> int:
+            self.alpha_temp = random.randint(1, self.q - 1)
+            self.public_key_temp = pow(self.g, self.alpha_temp, self.p)
+            return self.public_key_temp
+
+        def response(self, challenge: int) -> int:
+            return (self.alpha_temp + self.alpha * challenge) % self.q
+
+class SchnorrVerifier:
+    def __init__(self, group_id: GroupType):
+        self.crypto_group = Rfc3526(group_id)
+        self.p = self.crypto_group.p
+        self.g = self.crypto_group.g
+        self.q = self.crypto_group.q
+
+        self.public_key = None
+        self.public_key_temp = None
+
+        self.challenge = random.randint(0, self._q - 1)
+
+    def check(self, response: int) -> bool:  # check
+        left = pow(self.g, response, self.p)
+        right = (self.public_key_temp * pow(self.public_key, self.challenge, self.p)) % self.p
+        return left == right
+
+if __name__ == "__main__":
+    prover = SchnorrProver(GroupType.MODP_2048)
+    verifier = SchnorrVerifier(GroupType.MODP_2048)
+    
+    prover.gen_keys()
+    
+    verifier.public_key = prover.public_key
+    verifier.public_key_temp = prover.public_key_temp
+
+    result = verifier.check(prover.response(verifier.challenge))
+\end{minted}
+\caption{Classi SchnorrProver e SchnorrVerifier}
+\end{listing}
